@@ -8,13 +8,18 @@ protocol SynthesizedCKRecordConvertible {
 
 @convertibleToCKRecord(recordType: "FAUser")
 class User: SynthesizedCKRecordConvertible {
+    var dataList: [Data] = [Data()]
+    var photo: Data = "testando".data(using: .utf8)!
+    var otherPhoto: Data = Data()
     var name: String
     var idade: Int = Int.random(in: 10...20)
     var bool: Bool = false
-    var child: Optional<Int> = 10// = User(name: "a")
+    var child: Int? = 10// = User(name: "a")
     var lastModifiedUserRecordID: CKRecord.ID?
     var creationDate: Date? = Date()
     var recordChangeTag: String?
+    var rawName: String = "10"
+//    var sub: User? = User(name: "children")
     init(name: String) {
         self.name = name
     }
