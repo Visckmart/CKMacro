@@ -16,7 +16,7 @@ public struct StringifyMacro: MemberMacro {
     
     public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
         var print = [String]()
-        var decls = [(IdentifierPatternSyntax, IdentifierTypeSyntax)]()
+        var decls = [(IdentifierPatternSyntax, TypeAnnotationSyntax?)]()
         for member in declaration.memberBlock.members ?? [] {
 //            let member = member.as(NamedDeclSyntax.self)
             print.append("\(member.as(MemberBlockItemSyntax.self)?.decl)")
@@ -24,39 +24,45 @@ public struct StringifyMacro: MemberMacro {
                 for binding in member.bindings {
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
                         print.append(bindingPattern.identifier.trimmed.text)
-                        decls.append((bindingPattern, binding.typeAnnotation!.type.as(IdentifierTypeSyntax.self)!))
+                        decls.append((bindingPattern, binding.typeAnnotation))
                     }
                 }
             }
         }
+//        let ck = CKRecord(recordType: "a")
+//        ck.lastModifiedUserRecordID
         
+        let specialFields: [String: String] = [
+            "creationDate": "Date?",
+            "modificationDate": "Date?",
+            "creatorUserRecordID": "CKRecord.ID?",
+            "lastModifiedUserRecordID": "CKRecord.ID?",
+            "recordChangeTag": "String?"
+        ]
         
         var declsEnc: [String] = []
         for declaration in decls {
             let name = declaration.0.identifier.trimmed.text
             let type = declaration.1
             let enc: String
-//            if type.trimmed.name.text == "Optional" {
-//                enc = #"if let \#(name) {\#n\#trecord["\#(name)"] = \#(name) }"#
-//            } else {
-                enc = #"\#trecord["\#(name)"] = self.\#(name)"#
-//                \#(type.name) \#(type.trimmed.name == "Optional")
-//            }
-//            let enc = #"\#trecord["\#(name)"] = self.\#(name)"#
+            guard specialFields.keys.contains(name) == false else {
+                continue
+            }
+            enc = #"\#trecord["\#(name)"] = self.\#(name)"#
             declsEnc.append(enc)
         }
         
         var declsDec: [String] = []
         for declaration in decls {
             let name = declaration.0.identifier.trimmed.text
-            let type = declaration.1
+            let type = declaration.1!.type.trimmedDescription
             let dec: String
-//            if type.name == "Optional" {
-//                dec = #"if let \#(name) = ckRecord["\#(name)"] as? \#(type) {\#n\#t\#tself.\#(name) = \#(name) }"#
-//            } else {
-//                dec = #"\#tself.\#(name) = ckRecord["\#(name)"] as! \#(type)"#
-//            }
-            dec = #"\#tguard let \#(name) = ckRecord["\#(name)"] as? \#(type.trimmed) else {\#nreturn nil }\#nself.\#(name) = \#(name)"#
+            if let entry = specialFields[name] {
+//                dec = #"\#tguard let \#(name) = ckRecord.\#(name) as? \#(type) else {\#nthrow CKRecordDecodingError.missingField("\#(name)") }\#nself.\#(name) = \#(name)"#
+                dec = #"self.\#(name) = ckRecord.\#(name)"#
+            } else {
+                dec = #"\#tguard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {\#nthrow CKRecordDecodingError.missingField("\#(name)") }\#nself.\#(name) = \#(name)"#
+            }
             declsDec.append(dec)
         }
         let s = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description ?? "\"\(declaration.as(ClassDeclSyntax.self)?.name.trimmed.text ?? "unknown")\""
@@ -70,11 +76,16 @@ public struct StringifyMacro: MemberMacro {
             }
             """,
             """
-            required init?(from ckRecord: CKRecord) {
+            required init(from ckRecord: CKRecord) throws {
             \(raw: declsDec.joined(separator: "\n"))
             }
             """,
-            #"var x = """\#n\#(raw: decls.map{$0.1.description}.joined(separator: "\n"))\#n""""#
+            """
+            enum CKRecordDecodingError: Error {
+                case missingField(String)
+            }
+            """,
+            #"var x = """\#n\#(raw: decls.map{$0.1!.type.description}.joined(separator: "\n"))\#n""""#
 //            #"var x = """\#n\#(raw: s)\#n""""#
 //            #"var x = """\#n\#(raw: print.joined(separator: "\n--------\n"))\#n""""#
         ]
