@@ -7,5 +7,6 @@
 ///     #stringify(x + y)
 ///
 /// produces a tuple `(x + y, "x + y")`.
-@freestanding(expression)
-public macro stringify<T>(_ value: T) -> (T, String) = #externalMacro(module: "CKMacroMacros", type: "StringifyMacro")
+@attached(member, names: named(x), named(convertToCKRecord), named(init(from:)))
+@attached(extension)
+public macro convertibleToCKRecord(recordType: String? = nil) = #externalMacro(module: "CKMacroMacros", type: "StringifyMacro")
