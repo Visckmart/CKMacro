@@ -19,13 +19,16 @@ class User: SynthesizedCKRecordConvertible {
         self.name = name
     }
 }
+
 //CKRecord(recordType: "a").
 let u1 = User(name: "j")
 print(u1.x)
 let c1: some SynthesizedCKRecordConvertible = u1
 print(c1.convertToCKRecord())
 print(u1.convertToCKRecord())
-var m = Mirror(reflecting: try! User(from: u1.convertToCKRecord()))
+let reco = u1.convertToCKRecord()
+//reco["child"] = "a"
+var m = Mirror(reflecting: try! User(from: reco))
 print(m.children.map({ child in
     "\(child.label ?? "?"): \(child.value)"
 }).joined(separator: "\n"))

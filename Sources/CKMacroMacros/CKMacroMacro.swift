@@ -61,7 +61,15 @@ public struct StringifyMacro: MemberMacro {
 //                dec = #"\#tguard let \#(name) = ckRecord.\#(name) as? \#(type) else {\#nthrow CKRecordDecodingError.missingField("\#(name)") }\#nself.\#(name) = \#(name)"#
                 dec = #"self.\#(name) = ckRecord.\#(name)"#
             } else {
-                dec = #"\#tguard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {\#nthrow CKRecordDecodingError.missingField("\#(name)") }\#nself.\#(name) = \#(name)"#
+                dec = #"""
+                guard let raw\#(name.capitalized) = ckRecord["\#(name)"] else {
+                    throw CKRecordDecodingError.missingField("\#(name)")
+                }
+                guard let \#(name) = raw\#(name.capitalized) as? \#(type) else {
+                    throw CKRecordDecodingError.fieldWrongType("\#(name)", "\(type(of: raw\#(name.capitalized)))", "\#(type)")
+                }
+                self.\#(name) = \#(name)
+                """#
             }
             declsDec.append(dec)
         }
@@ -83,6 +91,7 @@ public struct StringifyMacro: MemberMacro {
             """
             enum CKRecordDecodingError: Error {
                 case missingField(String)
+                case fieldWrongType(String, String, String)
             }
             """,
             #"var x = """\#n\#(raw: decls.map{$0.1!.type.description}.joined(separator: "\n"))\#n""""#
