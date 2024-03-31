@@ -16,15 +16,16 @@ public struct StringifyMacro: MemberMacro {
     
     public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
         var print = [String]()
-        var decls = [(IdentifierPatternSyntax, TypeAnnotationSyntax?)]()
+        var decls = [(IdentifierPatternSyntax, TypeAnnotationSyntax?, String)]()
         for member in declaration.memberBlock.members ?? [] {
 //            let member = member.as(NamedDeclSyntax.self)
-            print.append("\(member.as(MemberBlockItemSyntax.self)?.decl)")
+//            print.append("\(member.as(MemberBlockItemSyntax.self)?.decl)")
             if let member = member.decl.as(VariableDeclSyntax.self) {
                 for binding in member.bindings {
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
-                        print.append(bindingPattern.identifier.trimmed.text)
-                        decls.append((bindingPattern, binding.typeAnnotation))
+//                        print.append(bindingPattern.identifier.trimmed.text)
+//                        print.append()
+                        decls.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
                     }
                 }
             }
@@ -74,6 +75,14 @@ public struct StringifyMacro: MemberMacro {
                 }
                 \#trecord["\#(name)"] = \#(name)Assets
                 
+                """#
+            } else if declaration.2 == "@Relationship" {
+                enc = #"""
+                // Relationship \#(name)
+                if let \#(name) {
+                let childRecord = \#(name).convertToCKRecord()
+                record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: .none)
+                }
                 """#
             } else {
                 enc = #"\#trecord["\#(name)"] = self.\#(name)"#
@@ -179,7 +188,7 @@ public struct StringifyMacro: MemberMacro {
                 case fieldWrongType(String, String, String)
             }
             """,
-            #"var x = """\#n\#n""""#
+            #"var x = """\#n\#(raw: print.joined(separator: "\n"))\#n""""#
 //            #"var x = """\#n\#(raw: s)\#n""""#
 //            #"var x = """\#n\#(raw: print.joined(separator: "\n--------\n"))\#n""""#
         ]
@@ -203,9 +212,18 @@ extension String {
     }
 }
 
+
+
+public struct RelationshipMarkerMacro: PeerMacro {
+    public static func expansion(of node: AttributeSyntax, providingPeersOf declaration: some DeclSyntaxProtocol, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
+        []
+    }
+}
+
 @main
 struct CKMacroPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         StringifyMacro.self,
+        RelationshipMarkerMacro.self
     ]
 }

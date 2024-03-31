@@ -6,8 +6,9 @@ protocol SynthesizedCKRecordConvertible {
     init(from ckRecord: CKRecord) throws
 }
 
-@convertibleToCKRecord(recordType: "FAUser")
+@ConvertibleToCKRecord(recordType: "FAUser")
 class User: SynthesizedCKRecordConvertible {
+    @Relationship var sub: User? = nil
     var dataList: [Data] = [Data()]
     var photo: Data = "testando".data(using: .utf8)!
     var otherPhoto: Data = Data()
@@ -19,14 +20,14 @@ class User: SynthesizedCKRecordConvertible {
     var creationDate: Date? = Date()
     var recordChangeTag: String?
     var rawName: String = "10"
-//    var sub: User? = User(name: "children")
-    init(name: String) {
+    init(name: String, sub: User? = nil) {
         self.name = name
+        self.sub = sub
     }
 }
 
 //CKRecord(recordType: "a").
-let u1 = User(name: "j")
+let u1 = User(name: "j", sub: User(name: "children"))
 print(u1.x)
 let c1: some SynthesizedCKRecordConvertible = u1
 print(c1.convertToCKRecord())
