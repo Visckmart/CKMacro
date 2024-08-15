@@ -6,7 +6,7 @@ protocol SynthesizedCKRecordConvertible {
     init(from ckRecord: CKRecord) throws
 }
 
-@ConvertibleToCKRecord(recordType: "FAUser")
+@ConvertibleToCKRecord(recordType: "VMUser")
 class User: SynthesizedCKRecordConvertible {
     @Relationship var sub: User? = nil
     var dataList: [Data] = [Data()]
@@ -34,7 +34,7 @@ print(c1.convertToCKRecord())
 print(u1.convertToCKRecord())
 let reco = u1.convertToCKRecord()
 //reco["child"] = "a"
-var m = Mirror(reflecting: try! User(from: reco))
-print(m.children.map({ child in
-    "\(child.label ?? "?"): \(child.value)"
-}).joined(separator: "\n"))
+//var m = Mirror(reflecting: try! User(from: reco))
+//print(m.children.map({ child in
+//    "\(child.label ?? "?"): \(child.value)"
+//}).joined(separator: "\n"))
