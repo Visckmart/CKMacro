@@ -1,13 +1,8 @@
 import CKMacro
 import CloudKit
 
-protocol SynthesizedCKRecordConvertible {
-    func convertToCKRecord() -> CKRecord
-    init(from ckRecord: CKRecord) throws
-}
-
-@ConvertibleToCKRecord(recordType: "VMUser")
-class User: SynthesizedCKRecordConvertible {
+@ConvertibleToCKRecord
+class User {
     @Relationship var sub: User? = nil
     var dataList: [Data] = [Data()]
     var photo: Data = "testando".data(using: .utf8)!
@@ -26,13 +21,31 @@ class User: SynthesizedCKRecordConvertible {
     }
 }
 
+public extension CKRecord {
+    var systemFieldsData: Data {
+        let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+        encodeSystemFields(with: archiver)
+        archiver.finishEncoding()
+        return archiver.encodedData
+    }
+    
+    convenience init?(systemFieldsData: Data) {
+        guard let una = try? NSKeyedUnarchiver(forReadingFrom: systemFieldsData) else {
+            return nil
+        }
+        self.init(coder: una)
+    }
+}
 //CKRecord(recordType: "a").
 let u1 = User(name: "j", sub: User(name: "children"))
-print(u1.x)
+//print(u1.x)
 let c1: some SynthesizedCKRecordConvertible = u1
-print(c1.convertToCKRecord())
+let r1 = c1.convertToCKRecord()
+//r1.lastModifiedUserRecordID = .init(recordName: "a")
+print(r1.creationDate)
 print(u1.convertToCKRecord())
 let reco = u1.convertToCKRecord()
+//print(CKRecord(systemFieldsData: u1.convertToCKRecord().systemFieldsData))
 //reco["child"] = "a"
 //var m = Mirror(reflecting: try! User(from: reco))
 //print(m.children.map({ child in

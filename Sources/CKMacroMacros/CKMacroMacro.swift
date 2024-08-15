@@ -3,102 +3,72 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-/// Implementation of the `stringify` macro, which takes an expression
-/// of any type and produces a tuple containing the value of that expression
-/// and the source code that produced the value. For example
-///
-///     #stringify(x + y)
-///
-///  will expand to
-///
-///     (x + y, "x + y")
-public struct StringifyMacro: MemberMacro {
+
+public struct ConvertibleToCKRecordMacro: MemberMacro {
     
-    public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
-        var print = [String]()
-        var decls = [(IdentifierPatternSyntax, TypeAnnotationSyntax?, String)]()
-        for member in declaration.memberBlock.members ?? [] {
-//            let member = member.as(NamedDeclSyntax.self)
-//            print.append("\(member.as(MemberBlockItemSyntax.self)?.decl)")
+    typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String)
+    
+    static let specialFields: [String: String] = [
+        "creationDate": "Date?",
+        "modificationDate": "Date?",
+        "creatorUserRecordID": "CKRecord.ID?",
+        "lastModifiedUserRecordID": "CKRecord.ID?",
+        "recordID": "CKRecord.ID",
+        "recordChangeTag": "String?"
+    ]
+    
+    public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [DeclSyntax] {
+        var declarationInfo = [DeclarationInfo]()
+        for member in declaration.memberBlock.members {
             if let member = member.decl.as(VariableDeclSyntax.self) {
                 for binding in member.bindings {
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
-//                        print.append(bindingPattern.identifier.trimmed.text)
-//                        print.append()
-                        decls.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
+                        declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
                     }
                 }
             }
         }
-//        let ck = CKRecord(recordType: "a")
-//        ck.lastModifiedUserRecordID
         
-        let specialFields: [String: String] = [
-            "creationDate": "Date?",
-            "modificationDate": "Date?",
-            "creatorUserRecordID": "CKRecord.ID?",
-            "lastModifiedUserRecordID": "CKRecord.ID?",
-            "recordID": "CKRecord.ID",
-            "recordChangeTag": "String?"
+        let encodingCodeBlock = makeEncodingDeclarations(forDeclarations: declarationInfo)
+        let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfo)
+        
+        let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
+        let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text
+        let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
+        
+        return [
+            """
+            func convertToCKRecord() -> CKRecord {
+                let record = CKRecord(recordType: \(raw: recordTypeName))
+                
+                \(encodingCodeBlock)
+            
+                return record
+            }
+            """,
+            """
+            required init(from ckRecord: CKRecord) throws {
+                \(decodingCodeBlock)
+            }
+            """,
+            """
+            enum CKRecordDecodingError: Error {
+                case missingField(String)
+                case fieldWrongType(String, String, String)
+            }
+            """,
         ]
-        
-        var declsEnc: [String] = []
-        for declaration in decls {
-            let name = declaration.0.identifier.trimmed.text
-            let type = declaration.1
-            let enc: String
-            guard specialFields.keys.contains(name) == false else {
-                continue
-            }
-            if type?.type.trimmedDescription == "Data" {
-                enc = #"""
-                let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
-                do {
-                    try self.\#(name).write(to: \#(name)TemporaryAssetURL)
-                } catch let error as NSError {
-                    debugPrint("Error creating asset for \#(name): \(error)")
-                }
-                \#trecord["\#(name)"] = CKAsset(fileURL: \#(name)TemporaryAssetURL)
-                
-                """#
-            } else if type?.type.trimmedDescription == "[Data]" {
-                enc = #"""
-                var \#(name)Assets = [CKAsset]()
-                for data in self.\#(name) {
-                    let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
-                    do {
-                        try data.write(to: \#(name)TemporaryAssetURL)
-                        \#(name)Assets.append(CKAsset(fileURL: \#(name)TemporaryAssetURL))
-                    } catch let error as NSError {
-                        debugPrint("Error creating assets for \#(name): \(error)")
-                    }
-                }
-                \#trecord["\#(name)"] = \#(name)Assets
-                
-                """#
-            } else if declaration.2 == "@Relationship" {
-                enc = #"""
-                // Relationship \#(name)
-                if let \#(name) {
-                let childRecord = \#(name).convertToCKRecord()
-                record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: .none)
-                }
-                """#
-            } else {
-                enc = #"\#trecord["\#(name)"] = self.\#(name)"#
-//                enc = #"record.setValue(self.\#(name), forKey: "\#(name)")"#
-            }
-            declsEnc.append(enc)
-        }
-        
+    }
+    
+    static func makeDecodingDeclarations(forDeclarations declarations: [DeclarationInfo]) -> DeclSyntax {
         var declsDec: [String] = []
-        for declaration in decls {
+        for declaration in declarations {
             let name = declaration.0.identifier.trimmed.text
             let type = declaration.1!.type.trimmedDescription
             let dec: String
             
             
-            if let entry = specialFields[name] {
+            if specialFields.keys.contains(name) {
                 dec = #"self.\#(name) = ckRecord.\#(name)"#
             } else if type == "Data" {
                 dec = #"""
@@ -165,42 +135,82 @@ public struct StringifyMacro: MemberMacro {
             }
             declsDec.append(dec)
         }
-        let s = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description ?? "\"\(declaration.as(ClassDeclSyntax.self)?.name.trimmed.text ?? "unknown")\""
-        return [
-//            #"var x = "\#(node.arguments?.firstToken(viewMode: .all) ?? "a")""#,
-            """
-            func convertToCKRecord() -> CKRecord {
-                let record = CKRecord(recordType: \(raw: s))
+        
+        return """
+               \(raw: declsDec.joined(separator: "\n"))
+               """
+    }
+    
+    static func makeEncodingDeclarations(forDeclarations declarations: [DeclarationInfo]) -> DeclSyntax {
+        var declsEnc: [String] = []
+        for declaration in declarations {
+            let name = declaration.0.identifier.trimmed.text
+            let type = declaration.1
+            let enc: String
+            guard specialFields.keys.contains(name) == false else {
+                continue
+            }
+            if type?.type.trimmedDescription == "Data" {
+                enc = #"""
+                let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
+                do {
+                    try self.\#(name).write(to: \#(name)TemporaryAssetURL)
+                } catch let error as NSError {
+                    debugPrint("Error creating asset for \#(name): \(error)")
+                }
+                \#trecord["\#(name)"] = CKAsset(fileURL: \#(name)TemporaryAssetURL)
                 
-                \(raw: declsEnc.joined(separator: "\n"))
-            
-                return record
+                """#
+            } else if type?.type.trimmedDescription == "[Data]" {
+                enc = #"""
+                var \#(name)Assets = [CKAsset]()
+                for data in self.\#(name) {
+                    let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
+                    do {
+                        try data.write(to: \#(name)TemporaryAssetURL)
+                        \#(name)Assets.append(CKAsset(fileURL: \#(name)TemporaryAssetURL))
+                    } catch let error as NSError {
+                        debugPrint("Error creating assets for \#(name): \(error)")
+                    }
+                }
+                \#trecord["\#(name)"] = \#(name)Assets
+                
+                """#
+            } else if declaration.2 == "@Relationship" {
+                enc = #"""
+                // Relationship \#(name)
+                if let \#(name) {
+                let childRecord = \#(name).convertToCKRecord()
+                record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: .none)
+                }
+                """#
+            } else {
+                enc = #"\#trecord["\#(name)"] = self.\#(name)"#
+                //                enc = #"record.setValue(self.\#(name), forKey: "\#(name)")"#
             }
-            """,
-            """
-            required init(from ckRecord: CKRecord) throws {
-                \(raw: declsDec.joined(separator: "\n"))
-            }
-            """,
-            """
-            enum CKRecordDecodingError: Error {
-                case missingField(String)
-                case fieldWrongType(String, String, String)
-            }
-            """,
-            #"var x = """\#n\#(raw: print.joined(separator: "\n"))\#n""""#
-//            #"var x = """\#n\#(raw: s)\#n""""#
-//            #"var x = """\#n\#(raw: print.joined(separator: "\n--------\n"))\#n""""#
+            declsEnc.append(enc)
+        }
+        return """
+               \(raw: declsEnc.joined(separator: "\n"))
+               """
+    }
+}
+
+extension ConvertibleToCKRecordMacro: ExtensionMacro {
+    public static func expansion(of node: AttributeSyntax, attachedTo declaration: some DeclGroupSyntax, providingExtensionsOf type: some TypeSyntaxProtocol, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [ExtensionDeclSyntax] {
+//        context.addDiagnostics(from: MyError(errorDescription: "\(protocols.description)"), node: node)
+        let equatableExtension = try ExtensionDeclSyntax("extension \(type.trimmed): SynthesizedCKRecordConvertible {}")
+        return [
+            equatableExtension
+//            try ExtensionDeclSyntax("extension \(declaration.as(ClassDeclSyntax.self)?.name.trimmed ?? "unknown") { static let i = 20 }")
         ]
     }
 }
 
-extension StringifyMacro: ExtensionMacro {
-    public static func expansion(of node: AttributeSyntax, attachedTo declaration: some DeclGroupSyntax, providingExtensionsOf type: some TypeSyntaxProtocol, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [ExtensionDeclSyntax] {
-        return [
-//            try ExtensionDeclSyntax("extension \(declaration.as(ClassDeclSyntax.self)?.name.trimmed ?? "unknown") { static let i = 20 }")
-        ]
-    }
+import Foundation
+
+struct MyError: LocalizedError {
+    var errorDescription: String?
 }
 
 
@@ -223,7 +233,7 @@ public struct RelationshipMarkerMacro: PeerMacro {
 @main
 struct CKMacroPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
-        StringifyMacro.self,
+        ConvertibleToCKRecordMacro.self,
         RelationshipMarkerMacro.self
     ]
 }
