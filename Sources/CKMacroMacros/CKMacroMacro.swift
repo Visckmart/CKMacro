@@ -51,12 +51,22 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 \(decodingCodeBlock)
             }
             """,
-            """
+            #"""
             enum CKRecordDecodingError: Error {
                 case missingField(String)
-                case fieldWrongType(String, String, String)
+                case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
+                
+                var localizedDescription: String {
+                    var genericError = "Error while trying to initialize an instance of \#(raw: className ?? "") from a CKRecord:"
+                    switch self {
+                        case let .missingField(fieldName):
+                            return "\(genericError) missing field '\(fieldName)' on CKRecord."
+                        case let .fieldTypeMismatch(fieldName, expectedType, foundType):
+                            return "\(genericError) field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
+                    }
+                }
             }
-            """,
+            """#,
         ]
     }
     
@@ -81,7 +91,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     let \#(name)FileURL = \#(name).fileURL,
                     let \#(name)Content = try? Data(contentsOf: \#(name)FileURL)
                 else {
-                    throw CKRecordDecodingError.fieldWrongType("\#(name)", "\(type(of: raw\#(name.firstCapitalized)))", "\#(type)")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: raw\#(name.firstCapitalized)))")
                 }
                 self.\#(name) = \#(name)Content
                 
@@ -95,7 +105,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 guard
                     let \#(name) = raw\#(name.firstCapitalized) as? [CKAsset]
                 else {
-                    throw CKRecordDecodingError.fieldWrongType("\#(name)", "\(type(of: raw\#(name.firstCapitalized)))", "\#(type)")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: raw\#(name.firstCapitalized)))")
                 }
                 var \#(name)AssetContents = [Data]()
                 for asset in \#(name) {
@@ -114,7 +124,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 dec = #"""
                 /// Decoding \#(name)
                 guard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {
-                    throw CKRecordDecodingError.fieldWrongType("\#(name)", "\(type(of: ckRecord["\#(name)"]))", "\#(type)")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: ckRecord["\#(name)"]))")
                 }
                 self.\#(name) = \#(name)
                 
@@ -127,7 +137,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     throw CKRecordDecodingError.missingField("\#(name)")
                 }
                 guard let \#(name) = raw\#(name.firstCapitalized) as? \#(type) else {
-                    throw CKRecordDecodingError.fieldWrongType("\#(name)", "\(type(of: raw\#(name.firstCapitalized)))", "\#(type)")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: raw\#(name.firstCapitalized)))")
                 }
                 self.\#(name) = \#(name)
                 
