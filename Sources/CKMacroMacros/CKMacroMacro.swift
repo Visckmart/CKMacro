@@ -41,7 +41,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             func convertToCKRecord() -> CKRecord {
                 let record = CKRecord(recordType: \(raw: recordTypeName))
                 
-                \(encodingCodeBlock)
+            \(encodingCodeBlock)
             
                 return record
             }
