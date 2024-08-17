@@ -14,14 +14,25 @@ class User {
     var lastModifiedUserRecordID: CKRecord.ID?
     var creationDate: Date? = Date()
     var recordChangeTag: String?
-    var rawName: String = "10"
+    let rawName: String
     var recordName: String?
+    
     init(name: String, sub: User? = nil) {
         self.name = name
-        self.sub = sub
+        self.rawName = "1"
+//        self.sub = sub
+    }
+    
+    
+    static func willFinishDecoding(instance: User) {
+//        instance.rawName = "intercepted"
     }
 }
-
+//extension User: SynthesizedCKRecordConvertible {
+//    static func willFinishDecoding(ckRecord: inout CKRecord) {
+//        <#code#>
+//    }
+//}
 public extension CKRecord {
     var systemFieldsData: Data {
         let archiver = NSKeyedArchiver(requiringSecureCoding: true)
@@ -41,11 +52,13 @@ public extension CKRecord {
 let u1 = User(name: "j", sub: User(name: "children"))
 //print(u1.x)
 let c1: some SynthesizedCKRecordConvertible = u1
-let r1 = c1.convertToCKRecord()
+let r1 = c1.convertToCKRecord(usingBaseCKRecord: nil)
 //r1.lastModifiedUserRecordID = .init(recordName: "a")
 print(r1.creationDate)
 print(u1.convertToCKRecord())
 let reco = u1.convertToCKRecord()
+let b = try User(from: u1.convertToCKRecord())
+print(b.rawName)
 //print(CKRecord(systemFieldsData: u1.convertToCKRecord().systemFieldsData))
 //reco["child"] = "a"
 //var m = Mirror(reflecting: try! User(from: reco))

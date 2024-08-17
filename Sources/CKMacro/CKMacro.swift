@@ -9,11 +9,14 @@ public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(m
 
 import CloudKit
 public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
-    func convertToCKRecord() -> CKRecord
+    func convertToCKRecord(usingBaseCKRecord: CKRecord?) -> CKRecord
     init(from ckRecord: CKRecord) throws
+    func willFinishDecoding(ckRecord: CKRecord)
 }
 
-
+public extension SynthesizedCKRecordConvertible {
+    public func willFinishDecoding(ckRecord: CKRecord) { }
+}
 public protocol CKIdentifiable {
     var recordName: String? { get set }
 }

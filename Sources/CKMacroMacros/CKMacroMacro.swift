@@ -25,10 +25,13 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
     ) throws -> [DeclSyntax] {
         
         var declarationInfo = [DeclarationInfo]()
+        var declarationInfoD = [DeclarationInfo]()
         for member in declaration.memberBlock.members {
             if let member = member.decl.as(VariableDeclSyntax.self) {
+//                return [">\(raw: member.bindingSpecifier.trimmed.text)"]
                 for binding in member.bindings {
                     let hasAccessor = binding.accessorBlock != nil
+//                    let m = member.modifiers.com
 //                    let hasInitializer = binding.initializer != nil
 //                    let hasSetter = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.filter({$0.accessorSpecifier == .keyword(.set)}).isEmpty ?? false
                     guard hasAccessor == false else { continue }
@@ -42,23 +45,30 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //                    ]
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
                         declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
+                        if member.bindingSpecifier.tokenKind != .keyword(.let) || binding.initializer == nil {
+                            declarationInfoD.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
+                        }
                     }
                 }
             }
         }
         
         let encodingCodeBlock = makeEncodingDeclarations(forDeclarations: declarationInfo)
-        let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfo)
-        
+        let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD)
+//        return declaration.memberBlock.members.compactMap { $0.decl.as(VariableDeclSyntax.self) }.compactMap {
+//            "\(raw: $0.bindingSpecifier.tokenKind == .keyword(.let)) \(raw: $0.bindings.contains(where: {$0.initializer != nil}))" as DeclSyntax?
+//        }
         let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
         let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text
         let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
         
         return [
             """
-            func convertToCKRecord() -> CKRecord {
+            func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) -> CKRecord {
                 let record: CKRecord
-                if let recordName {
+                if let baseRecord {
+                    record = baseRecord
+                } else if let recordName {
                     record = CKRecord(recordType: \(raw: recordTypeName), recordID: CKRecord.ID(recordName: recordName))
                 } else {
                     record = CKRecord(recordType: \(raw: recordTypeName))
@@ -70,23 +80,28 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
             """,
             """
+            
             required init(from ckRecord: CKRecord) throws {
-                \(decodingCodeBlock)
+            \(decodingCodeBlock)
+            self.willFinishDecoding(ckRecord: ckRecord)
             }
             """,
             #"""
             enum CKRecordDecodingError: Error {
-                case missingField(String)
+                
+            case missingField(String)
                 case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
                 
                 var localizedDescription: String {
-                    var genericError = "Error while trying to initialize an instance of \#(raw: className ?? "") from a CKRecord:"
+                    let genericMessage = "Error while trying to initialize an instance of \#(raw: className ?? "") from a CKRecord:"
+                    let specificReason: String
                     switch self {
                         case let .missingField(fieldName):
-                            return "\(genericError) missing field '\(fieldName)' on CKRecord."
+                            specificReason = "missing field '\(fieldName)' on CKRecord."
                         case let .fieldTypeMismatch(fieldName, expectedType, foundType):
-                            return "\(genericError) field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
+                            specificReason = "field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
                     }
+                    return "\(genericMessage) \(specificReason)" 
                 }
             }
             """#,
@@ -105,7 +120,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 dec = #"self.\#(name) = ckRecord.\#(name)"#
             } else if type == "Data" {
                 dec = #"""
-                /// Decoding \#(name)
+                /// Decoding `\#(name)`
                 guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
                     throw CKRecordDecodingError.missingField("\#(name)")
                 }
@@ -121,7 +136,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#
             } else if type == "[Data]" {
                 dec = #"""
-                /// Decoding \#(name)
+                /// Decoding `\#(name)`
                 guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
                     throw CKRecordDecodingError.missingField("\#(name)")
                 }
@@ -145,7 +160,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#
             } else if type.hasSuffix("?") || type.hasPrefix("Optional<") {
                 dec = #"""
-                /// Decoding \#(name)
+                /// Decoding `\#(name)`
                 guard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {
                     throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: ckRecord["\#(name)"]))")
                 }
@@ -155,7 +170,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
             } else {
                 dec = #"""
-                /// Decoding \#(name)
+                /// Decoding `\#(name)`
                 guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
                     throw CKRecordDecodingError.missingField("\#(name)")
                 }
@@ -211,12 +226,13 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#
             } else if declaration.2 == "@Relationship" {
                 enc = #"""
-                // Relationship \#(name)
-                if let \#(name) {
-                let childRecord = \#(name).convertToCKRecord()
-                record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: .none)
-                }
-                """#
+                       /// Relationship `\#(name)`
+                       if let \#(name) {
+                           let childRecord = \#(name).convertToCKRecord()
+                           record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: .none)
+                       }
+                       
+                       """#
             } else {
                 enc = #"\#trecord["\#(name)"] = self.\#(name)"#
                 //                enc = #"record.setValue(self.\#(name), forKey: "\#(name)")"#
