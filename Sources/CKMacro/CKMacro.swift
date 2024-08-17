@@ -8,9 +8,14 @@
 public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(module: "CKMacroMacros", type: "ConvertibleToCKRecordMacro")
 
 import CloudKit
-public protocol SynthesizedCKRecordConvertible {
+public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
     func convertToCKRecord() -> CKRecord
     init(from ckRecord: CKRecord) throws
+}
+
+
+public protocol CKIdentifiable {
+    var recordName: String? { get set }
 }
 @attached(peer)
 public macro Relationship() = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")

@@ -15,6 +15,7 @@ class User {
     var creationDate: Date? = Date()
     var recordChangeTag: String?
     var rawName: String = "10"
+    var recordName: String?
     init(name: String, sub: User? = nil) {
         self.name = name
         self.sub = sub

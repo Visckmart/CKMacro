@@ -17,11 +17,29 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         "recordChangeTag": "String?"
     ]
     
-    public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [DeclSyntax] {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingMembersOf declaration: some DeclGroupSyntax,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [DeclSyntax] {
+        
         var declarationInfo = [DeclarationInfo]()
         for member in declaration.memberBlock.members {
             if let member = member.decl.as(VariableDeclSyntax.self) {
                 for binding in member.bindings {
+                    let hasAccessor = binding.accessorBlock != nil
+//                    let hasInitializer = binding.initializer != nil
+//                    let hasSetter = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.filter({$0.accessorSpecifier == .keyword(.set)}).isEmpty ?? false
+                    guard hasAccessor == false else { continue }
+//                    return [
+//                    #"""
+//                    var b = """
+//                            \#(raw: binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.trimmed.text)
+//                            \#(raw: binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.filter({$0.accessorSpecifier == .keyword(.set)}).isEmpty)
+//                            """
+//                    """#
+//                    ]
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
                         declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
                     }
@@ -39,7 +57,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         return [
             """
             func convertToCKRecord() -> CKRecord {
-                let record = CKRecord(recordType: \(raw: recordTypeName))
+                let record: CKRecord
+                if let recordName {
+                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: CKRecord.ID(recordName: recordName))
+                } else {
+                    record = CKRecord(recordType: \(raw: recordTypeName))
+                }
                 
             \(encodingCodeBlock)
             
