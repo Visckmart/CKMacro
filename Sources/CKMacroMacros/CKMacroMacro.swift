@@ -6,7 +6,7 @@ import SwiftSyntaxMacros
 
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
-    typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String)
+    typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String, String?)
     
     static let specialFields: [String: String] = [
         "creationDate": "Date?",
@@ -44,9 +44,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //                    """#
 //                    ]
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
-                        declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
+                        declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, member.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmedDescription))
                         if member.bindingSpecifier.tokenKind != .keyword(.let) || binding.initializer == nil {
-                            declarationInfoD.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription))
+//                            let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
+                            
+                            declarationInfoD.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, nil))
                         }
                     }
                 }
@@ -55,9 +57,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         
         let encodingCodeBlock = makeEncodingDeclarations(forDeclarations: declarationInfo)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD)
-//        return declaration.memberBlock.members.compactMap { $0.decl.as(VariableDeclSyntax.self) }.compactMap {
-//            "\(raw: $0.bindingSpecifier.tokenKind == .keyword(.let)) \(raw: $0.bindings.contains(where: {$0.initializer != nil}))" as DeclSyntax?
-//        }
+        
         let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
         let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text
         let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
@@ -69,24 +69,27 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             """
             
             required init(from ckRecord: CKRecord, fetchingNestedRecordsFrom database: CKDatabase? = nil) async throws {
-            func unwrappedType<T>(of value: T) -> Any.Type {
-            if let ckRecordValue = value as? CKRecordValue {
-            ckRecordTypeOf(of: ckRecordValue)
-            } else {
-            Swift.type(of: value as Any)
-            }
-            }
-            func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
-            Swift.type(of: v as Any)
-            }
-            
-            \(decodingCodeBlock)
-            self.willFinishDecoding(ckRecord: ckRecord)
+                func unwrappedType<T>(of value: T) -> Any.Type {
+                    if let ckRecordValue = value as? CKRecordValue {
+                        ckRecordTypeOf(of: ckRecordValue)
+                    } else {
+                        Swift.type(of: value as Any)
+                    }
+                }
+                func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
+                    Swift.type(of: v as Any)
+                }
+                
+                \(decodingCodeBlock)
+                
+                if let delegate = self as? SynthesizedCKRecordDelegate {
+                    delegate.willFinishDecoding(ckRecord: ckRecord)
+                }
             }
             """,
             """
             func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) -> CKRecord {
-                let record: CKRecord
+                var record: CKRecord
                 if let baseRecord {
                     record = baseRecord
                 } else if let recordName {
@@ -95,8 +98,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     record = CKRecord(recordType: \(raw: recordTypeName))
                 }
                 
-            \(encodingCodeBlock)
-            
+                \(encodingCodeBlock)
+                
+                if let delegate = self as? SynthesizedCKRecordDelegate {
+                    delegate.willFinishEncoding(ckRecord: record)
+                }
+                
                 return record
             }
             """,
@@ -160,9 +167,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
                     throw CKRecordDecodingError.missingField("\#(name)")
                 }
-                guard
-                    let \#(name) = raw\#(name.firstCapitalized) as? [CKAsset]
-                else {
+                guard let \#(name) = raw\#(name.firstCapitalized) as? [CKAsset] else {
                     throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: raw\#(name.firstCapitalized)))")
                 }
                 var \#(name)AssetContents = [Data]()
@@ -178,7 +183,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 self.\#(name) = \#(name)AssetContents
                 
                 """#
-            } else if declaration.2 == "@Relationship" {
+            } else if declaration.2.hasPrefix("@CKReference") {
                 var filteredType = type
                 if filteredType.hasSuffix("?") { filteredType = String(filteredType.dropLast()) }
                 if filteredType.hasPrefix("Optional<") { filteredType = String(filteredType.dropFirst(9).dropLast()) }
@@ -218,13 +223,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                       
                     """#
                     : #"""
-                       guard let database else {
-                           throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
-                       }
-                       let \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
-                       let \#(name) = try await \#(filteredType)(from: \#(name)Record)
-                       self.\#(name) = \#(name)
-                       """#
+                    guard let database else {
+                        throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
+                    }
+                    let \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
+                    let \#(name) = try await \#(filteredType)(from: \#(name)Record)
+                    self.\#(name) = \#(name)
+                    
+                    """#
                  )
             } else if type.hasSuffix("?") || type.hasPrefix("Optional<") {
                 dec = #"""
@@ -252,9 +258,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             declsDec.append(dec)
         }
         
-        return """
-               \(raw: declsDec.joined(separator: "\n"))
-               """
+        return "\(raw: declsDec.joined(separator: "\n"))"
     }
     
     static func makeEncodingDeclarations(forDeclarations declarations: [DeclarationInfo]) -> DeclSyntax {
@@ -274,7 +278,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } catch let error as NSError {
                     debugPrint("Error creating asset for \#(name): \(error)")
                 }
-                \#trecord["\#(name)"] = CKAsset(fileURL: \#(name)TemporaryAssetURL)
+                record["\#(name)"] = CKAsset(fileURL: \#(name)TemporaryAssetURL)
                 
                 """#
             } else if type?.type.trimmedDescription == "[Data]" {
@@ -289,27 +293,26 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         debugPrint("Error creating assets for \#(name): \(error)")
                     }
                 }
-                \#trecord["\#(name)"] = \#(name)Assets
+                record["\#(name)"] = \#(name)Assets
                 
                 """#
-            } else if declaration.2 == "@Relationship" {
+            } else if declaration.2.hasPrefix("@CKReference") {
                 enc = #"""
-                       /// Relationship `\#(name)`
-                       if let \#(name) {
-                           let childRecord = \#(name).convertToCKRecord()
-                           record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: .none)
-                       }
-                       
-                       """#
+                    /// Relationship `\#(name)`
+                    if let \#(name) {
+                        let childRecord = \#(name).convertToCKRecord()
+                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: \#(declaration.3!))
+                    }
+                    
+                    """#
             } else {
-                enc = #"\#trecord["\#(name)"] = self.\#(name)"#
+                enc = #"record["\#(name)"] = self.\#(name)"#
                 //                enc = #"record.setValue(self.\#(name), forKey: "\#(name)")"#
             }
             declsEnc.append(enc)
         }
-        return """
-               \(raw: declsEnc.joined(separator: "\n"))
-               """
+        
+        return "\(raw: declsEnc.joined(separator: "\n"))"
     }
 }
 

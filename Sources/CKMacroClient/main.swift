@@ -3,7 +3,8 @@ import CloudKit
 
 @ConvertibleToCKRecord
 class User {
-    @Relationship var sub: User? = nil
+    
+    @CKReference(action: .deleteSelf) var sub: User? = nil
     var dataList: [Data] = [Data()]
     var photo: Data = "testando".data(using: .utf8)!
     var otherPhoto: Data = Data()
@@ -20,14 +21,19 @@ class User {
     init(name: String, sub: User? = nil) {
         self.name = name
         self.rawName = "1"
-//        self.sub = sub
     }
-    
-    
+}
+
+
+extension User: SynthesizedCKRecordDelegate {
+    func willFinishEncoding(ckRecord: CKRecord) {
+        ckRecord["name"] = "y"
+    }
     func willFinishDecoding(ckRecord: CKRecord) {
         if let name = ckRecord["name"] as? String, name.hasPrefix("b") {
             self.idade = 100
         }
+        self.name = "testing"
     }
 }
 //extension User: SynthesizedCKRecordConvertible {
@@ -65,12 +71,12 @@ await Task {
         print(u1.convertToCKRecord())
         
         let reco = u1.convertToCKRecord()
-        print(u1.sub)
+        print(r1["name"])
 //        reco["name"] = true
 //        print(typeWrapper(of: reco["name"]))
-        reco["name"] = "bay"
+//        reco["name"] = "bay"
         let b = try await User(from: reco)
-        print(b.idade)
+        print(b.name)
         //print(CKRecord(systemFieldsData: u1.convertToCKRecord().systemFieldsData))
         //reco["child"] = "a"
         //var m = Mirror(reflecting: try! User(from: reco))

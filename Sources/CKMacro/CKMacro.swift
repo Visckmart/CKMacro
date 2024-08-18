@@ -11,14 +11,20 @@ import CloudKit
 public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
     func convertToCKRecord(usingBaseCKRecord: CKRecord?) -> CKRecord
     init(from ckRecord: CKRecord, fetchingNestedRecordsFrom: CKDatabase?) async throws
+}
+
+
+public protocol CKRecordSynthetizationDelegate: SynthesizedCKRecordConvertible {
+    func willFinishEncoding(ckRecord: CKRecord)
     func willFinishDecoding(ckRecord: CKRecord)
 }
 
-public extension SynthesizedCKRecordConvertible {
+public extension CKRecordSynthetizationDelegate {
+    public func willFinishEncoding(ckRecord: CKRecord) { }
     public func willFinishDecoding(ckRecord: CKRecord) { }
 }
 public protocol CKIdentifiable {
     var recordName: String? { get set }
 }
 @attached(peer)
-public macro Relationship() = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
+public macro CKReference(action: CKRecord.ReferenceAction) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
