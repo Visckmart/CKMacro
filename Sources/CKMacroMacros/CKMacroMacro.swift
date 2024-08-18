@@ -64,6 +64,27 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         
         return [
             """
+            //func type<T: CKRecordValue>(of v: T?) -> (any Any.Type)? { v.flatMap { type(of: $0 as Any) } }
+            """,
+            """
+            
+            required init(from ckRecord: CKRecord, fetchingNestedRecordsFrom database: CKDatabase? = nil) async throws {
+            func unwrappedType<T>(of value: T) -> Any.Type {
+            if let ckRecordValue = value as? CKRecordValue {
+            ckRecordTypeOf(of: ckRecordValue)
+            } else {
+            Swift.type(of: value as Any)
+            }
+            }
+            func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
+            Swift.type(of: v as Any)
+            }
+            
+            \(decodingCodeBlock)
+            self.willFinishDecoding(ckRecord: ckRecord)
+            }
+            """,
+            """
             func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) -> CKRecord {
                 let record: CKRecord
                 if let baseRecord {
@@ -79,19 +100,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 return record
             }
             """,
-            """
-            
-            required init(from ckRecord: CKRecord) throws {
-            \(decodingCodeBlock)
-            self.willFinishDecoding(ckRecord: ckRecord)
-            }
-            """,
             #"""
             enum CKRecordDecodingError: Error {
                 
-            case missingField(String)
+                case missingField(String)
                 case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
-                
+                case missingDatabase(fieldName: String)
+                case errorDecodingNestedField(fieldName: String, _ error: Error)
+            
                 var localizedDescription: String {
                     let genericMessage = "Error while trying to initialize an instance of \#(raw: className ?? "") from a CKRecord:"
                     let specificReason: String
@@ -100,6 +116,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             specificReason = "missing field '\(fieldName)' on CKRecord."
                         case let .fieldTypeMismatch(fieldName, expectedType, foundType):
                             specificReason = "field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
+                        case let .missingDatabase(fieldName):
+                            specificReason = "missing database to fetch relationship '\(fieldName)'."
+                        case let .errorDecodingNestedField(fieldName, error):
+                            specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
                     }
                     return "\(genericMessage) \(specificReason)" 
                 }
@@ -129,7 +149,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     let \#(name)FileURL = \#(name).fileURL,
                     let \#(name)Content = try? Data(contentsOf: \#(name)FileURL)
                 else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: raw\#(name.firstCapitalized)))")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: raw\#(name.firstCapitalized)))")
                 }
                 self.\#(name) = \#(name)Content
                 
@@ -143,7 +163,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 guard
                     let \#(name) = raw\#(name.firstCapitalized) as? [CKAsset]
                 else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: raw\#(name.firstCapitalized)))")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: raw\#(name.firstCapitalized)))")
                 }
                 var \#(name)AssetContents = [Data]()
                 for asset in \#(name) {
@@ -158,11 +178,59 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 self.\#(name) = \#(name)AssetContents
                 
                 """#
+            } else if declaration.2 == "@Relationship" {
+                var filteredType = type
+                if filteredType.hasSuffix("?") { filteredType = String(filteredType.dropLast()) }
+                if filteredType.hasPrefix("Optional<") { filteredType = String(filteredType.dropFirst(9).dropLast()) }
+                let isOptional = filteredType != type
+                dec = #"""
+                       /// Relationship `\#(name)`
+                       guard let \#(name)Reference = ckRecord["\#(name)"] as? CKRecord.Reference\#(isOptional ? "?" : "") else {  
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "CKRecord.Reference\#(isOptional ? "?" : "")", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                       }
+                       
+                       """#
+                +
+                (
+                    isOptional
+                    ? #"""
+                    if let \#(name)Reference {
+                        guard let database else {
+                           throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
+                        }
+                        var \#(name)Record: CKRecord?
+                        do {
+                            \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
+                        } catch CKError.unknownItem {
+                            \#(name)Record = nil
+                        }
+                        if let \#(name)Record {
+                            do {
+                                let \#(name) = try await \#(filteredType)(from: \#(name)Record)
+                                self.\#(name) = \#(name)
+                            } catch {
+                                throw CKRecordDecodingError.errorDecodingNestedField(fieldName: "\#(name)", error)
+                            }
+                        } else {
+                            self.\#(name) = nil
+                        }
+                    }
+                      
+                    """#
+                    : #"""
+                       guard let database else {
+                           throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
+                       }
+                       let \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
+                       let \#(name) = try await \#(filteredType)(from: \#(name)Record)
+                       self.\#(name) = \#(name)
+                       """#
+                 )
             } else if type.hasSuffix("?") || type.hasPrefix("Optional<") {
                 dec = #"""
                 /// Decoding `\#(name)`
                 guard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: ckRecord["\#(name)"]))")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
                 }
                 self.\#(name) = \#(name)
                 
@@ -175,7 +243,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     throw CKRecordDecodingError.missingField("\#(name)")
                 }
                 guard let \#(name) = raw\#(name.firstCapitalized) as? \#(type) else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(type(of: raw\#(name.firstCapitalized)))")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: raw\#(name.firstCapitalized)))")
                 }
                 self.\#(name) = \#(name)
                 

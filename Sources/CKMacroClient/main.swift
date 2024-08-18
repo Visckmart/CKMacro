@@ -7,7 +7,7 @@ class User {
     var dataList: [Data] = [Data()]
     var photo: Data = "testando".data(using: .utf8)!
     var otherPhoto: Data = Data()
-    var name: String
+    var name: String?
     var idade: Int = Int.random(in: 10...20)
     var bool: Bool = false
     var child: Int? = 10// = User(name: "a")
@@ -24,8 +24,10 @@ class User {
     }
     
     
-    static func willFinishDecoding(instance: User) {
-//        instance.rawName = "intercepted"
+    func willFinishDecoding(ckRecord: CKRecord) {
+        if let name = ckRecord["name"] as? String, name.hasPrefix("b") {
+            self.idade = 100
+        }
     }
 }
 //extension User: SynthesizedCKRecordConvertible {
@@ -48,20 +50,48 @@ public extension CKRecord {
         self.init(coder: una)
     }
 }
-//CKRecord(recordType: "a").
-let u1 = User(name: "j", sub: User(name: "children"))
-//print(u1.x)
-let c1: some SynthesizedCKRecordConvertible = u1
-let r1 = c1.convertToCKRecord(usingBaseCKRecord: nil)
-//r1.lastModifiedUserRecordID = .init(recordName: "a")
-print(r1.creationDate)
-print(u1.convertToCKRecord())
-let reco = u1.convertToCKRecord()
-let b = try User(from: u1.convertToCKRecord())
-print(b.rawName)
-//print(CKRecord(systemFieldsData: u1.convertToCKRecord().systemFieldsData))
-//reco["child"] = "a"
-//var m = Mirror(reflecting: try! User(from: reco))
-//print(m.children.map({ child in
-//    "\(child.label ?? "?"): \(child.value)"
-//}).joined(separator: "\n"))
+
+await Task {
+    do {
+        //    CKDatabase().record(for: <#T##CKRecord.ID#>)
+        //CKRecord.Reference(recordID: CKRecord.ID(recordName: "a"), action: .none).recordID
+        //CKRecord(recordType: "a").
+        let u1 = User(name: "j"/*, sub: User(name: "children")*/)
+        //print(u1.x)
+        let c1: some SynthesizedCKRecordConvertible = u1
+        let r1 = c1.convertToCKRecord(usingBaseCKRecord: nil)
+        //r1.lastModifiedUserRecordID = .init(recordName: "a")
+        print(r1.creationDate)
+        print(u1.convertToCKRecord())
+        
+        let reco = u1.convertToCKRecord()
+        print(u1.sub)
+//        reco["name"] = true
+//        print(typeWrapper(of: reco["name"]))
+        reco["name"] = "bay"
+        let b = try await User(from: reco)
+        print(b.idade)
+        //print(CKRecord(systemFieldsData: u1.convertToCKRecord().systemFieldsData))
+        //reco["child"] = "a"
+        //var m = Mirror(reflecting: try! User(from: reco))
+        //print(m.children.map({ child in
+        //    "\(child.label ?? "?"): \(child.value)"
+        //}).joined(separator: "\n"))
+    } catch let error as User.CKRecordDecodingError {
+        print(error.localizedDescription)
+    }
+}.value
+//
+//func opening<T: CKRecordValue>(x: T?) -> Any.Type? {
+//    x.flatMap { type(of: $0 as Any) }
+//}
+//func typeWrapper<T>(of value: T) -> Any.Type {
+//    if let ckRecordValue = value as? CKRecordValue {
+//        ckRecordTypeOf(of: ckRecordValue)
+//    } else {
+//        Swift.type(of: value as Any)
+//    }
+//}
+//func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
+//    Swift.type(of: v as Any)
+//}
