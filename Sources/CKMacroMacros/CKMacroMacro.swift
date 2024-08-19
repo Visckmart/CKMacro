@@ -82,7 +82,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 \(decodingCodeBlock)
                 
-                if let delegate = self as? SynthesizedCKRecordDelegate {
+                if let delegate = self as? CKRecordSynthetizationDelegate {
                     delegate.willFinishDecoding(ckRecord: ckRecord)
                 }
             }
@@ -100,7 +100,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 \(encodingCodeBlock)
                 
-                if let delegate = self as? SynthesizedCKRecordDelegate {
+                if let delegate = self as? CKRecordSynthetizationDelegate {
                     delegate.willFinishEncoding(ckRecord: record)
                 }
                 

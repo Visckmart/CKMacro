@@ -25,7 +25,7 @@ class User {
 }
 
 
-extension User: SynthesizedCKRecordDelegate {
+extension User: CKRecordSynthetizationDelegate {
     func willFinishEncoding(ckRecord: CKRecord) {
         ckRecord["name"] = "y"
     }
