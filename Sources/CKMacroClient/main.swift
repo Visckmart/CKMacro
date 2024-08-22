@@ -4,7 +4,8 @@ import CloudKit
 @ConvertibleToCKRecord
 class User {
     
-    @CKReference(action: .deleteSelf) var sub: User? = nil
+//    @CKReference(action: .deleteSelf) var sub: User? = nil
+    @CKReference(action: .deleteSelf) var extra: Extra
     var dataList: [Data] = [Data()]
     var photo: Data = "testando".data(using: .utf8)!
     var otherPhoto: Data = Data()
@@ -16,7 +17,8 @@ class User {
     var creationDate: Date? = Date()
     var recordChangeTag: String?
     let rawName: String
-    var recordName: String?
+//    var id: CKRecord.ID? { get { __recordID } }
+//    var recordName: String? { get { }}
     
     init(name: String, sub: User? = nil) {
         self.name = name
@@ -25,6 +27,10 @@ class User {
 }
 
 
+class Extra {
+    var info: Int = 10
+}
+//User(name: "a").id
 extension User: CKRecordSynthetizationDelegate {
     func willFinishEncoding(ckRecord: CKRecord) {
         ckRecord["name"] = "y"
@@ -69,7 +75,7 @@ await Task {
         //r1.lastModifiedUserRecordID = .init(recordName: "a")
         print(r1.creationDate)
         print(u1.convertToCKRecord())
-        
+//        print(u1.id)
         let reco = u1.convertToCKRecord()
         print(r1["name"])
 //        reco["name"] = true

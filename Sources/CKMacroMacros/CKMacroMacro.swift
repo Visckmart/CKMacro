@@ -80,6 +80,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     Swift.type(of: v as Any)
                 }
                 
+                self.__recordID = ckRecord.recordID
+                
                 \(decodingCodeBlock)
                 
                 if let delegate = self as? CKRecordSynthetizationDelegate {
@@ -92,8 +94,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 var record: CKRecord
                 if let baseRecord {
                     record = baseRecord
-                } else if let recordName {
-                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: CKRecord.ID(recordName: recordName))
+                } else if let __recordID {
+                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
                 } else {
                     record = CKRecord(recordType: \(raw: recordTypeName))
                 }
@@ -106,6 +108,9 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 return record
             }
+            """,
+            """
+            var __recordID: CKRecord.ID?
             """,
             #"""
             enum CKRecordDecodingError: Error {

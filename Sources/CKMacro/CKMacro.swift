@@ -3,7 +3,7 @@
 
 //@_exported import CKMacroMacros
 
-@attached(member, names: named(x), named(convertToCKRecord), named(init(from:fetchingNestedRecordsFrom:)), named(CKRecordDecodingError))
+@attached(member, names: named(x), named(convertToCKRecord), named(init(from:fetchingNestedRecordsFrom:)), named(CKRecordDecodingError), named(__recordID))
 @attached(extension, conformances: SynthesizedCKRecordConvertible)
 public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(module: "CKMacroMacros", type: "ConvertibleToCKRecordMacro")
 
@@ -24,7 +24,7 @@ public extension CKRecordSynthetizationDelegate {
     public func willFinishDecoding(ckRecord: CKRecord) { }
 }
 public protocol CKIdentifiable {
-    var recordName: String? { get set }
+    var __recordID: CKRecord.ID? { get set }
 }
 @attached(peer)
 public macro CKReference(action: CKRecord.ReferenceAction) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
