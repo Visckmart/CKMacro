@@ -302,7 +302,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 """#
             } else if declaration.2.hasPrefix("@CKReference") {
-                enc = #"""
+                let isOptional = type?.trimmedDescription.hasSuffix("?") ?? false || type?.trimmedDescription.hasPrefix("Optional<") ?? false
+                
+                if isOptional {
+                    enc = #"""
                     /// Relationship `\#(name)`
                     if let \#(name) {
                         let childRecord = \#(name).convertToCKRecord()
@@ -310,6 +313,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                     
                     """#
+                } else {
+                    enc = #"""
+                    /// Relationship `\#(name)`
+                    let childRecord = \#(name).convertToCKRecord()
+                    record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: \#(declaration.3!))
+                    
+                    """#
+                }
             } else {
                 enc = #"record["\#(name)"] = self.\#(name)"#
                 //                enc = #"record.setValue(self.\#(name), forKey: "\#(name)")"#

@@ -23,13 +23,18 @@ class User {
     init(name: String, sub: User? = nil) {
         self.name = name
         self.rawName = "1"
+        self.extra = Extra()
     }
 }
 
-
+@ConvertibleToCKRecord
 class Extra {
     var info: Int = 10
+    init(info: Int = 10) {
+        self.info = info
+    }
 }
+
 //User(name: "a").id
 extension User: CKRecordSynthetizationDelegate {
     func willFinishEncoding(ckRecord: CKRecord) {
@@ -83,6 +88,8 @@ await Task {
 //        reco["name"] = "bay"
         let b = try await User(from: reco)
         print(b.name)
+        print(b.bool)
+        dump(r1["bool"])
         //print(CKRecord(systemFieldsData: u1.convertToCKRecord().systemFieldsData))
         //reco["child"] = "a"
         //var m = Mirror(reflecting: try! User(from: reco))
