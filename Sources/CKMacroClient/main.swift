@@ -114,3 +114,98 @@ await Task {
 //func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
 //    Swift.type(of: v as Any)
 //}
+
+//@ConvertibleToCKRecord
+class ModularDefinition {
+    var integer: Int
+    init(integer: Int = 10) {
+        self.integer = integer
+    }
+    static func decodeInteger(ckRecord: CKRecord) throws -> Int {
+        /// Decoding `integer`
+        guard let rawInteger = ckRecord["integer"] else {
+            throw CKRecordDecodingError.missingField("integer")
+        }
+        guard let integer = rawInteger as? Int else {
+            throw CKRecordDecodingError.missingField("integer2")
+        }
+        let x: PartialKeyPath<Self> = \.integer
+        return 100
+    }
+    required init(from ckRecord: CKRecord, fetchingNestedRecordsFrom database: CKDatabase? = nil) async throws {
+        func unwrappedType<T>(of value: T) -> Any.Type {
+            if let ckRecordValue = value as? CKRecordValue {
+                ckRecordTypeOf(of: ckRecordValue)
+            } else {
+                Swift.type(of: value as Any)
+            }
+        }
+        func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
+            Swift.type(of: v as Any)
+        }
+        
+        self.__recordID = ckRecord.recordID
+        
+        
+        self.integer = try Self.decodeInteger(ckRecord: ckRecord)
+        
+        
+        if let delegate = self as? CKRecordSynthetizationDelegate {
+            delegate.willFinishDecoding(ckRecord: ckRecord)
+        }
+    }
+    
+    func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) -> CKRecord {
+        var record: CKRecord
+        if let baseRecord {
+            record = baseRecord
+        } else if let __recordID {
+            record = CKRecord(recordType: "ModularDefinition", recordID: __recordID)
+        } else {
+            record = CKRecord(recordType: "ModularDefinition")
+        }
+        
+        record["integer"] = self.integer
+        
+        if let delegate = self as? CKRecordSynthetizationDelegate {
+            delegate.willFinishEncoding(ckRecord: record)
+        }
+        
+        return record
+    }
+    
+    var __recordID: CKRecord.ID?
+    
+    enum CKRecordDecodingError: Error {
+        
+        case missingField(String)
+        case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
+        case missingDatabase(fieldName: String)
+        case errorDecodingNestedField(fieldName: String, _ error: Error)
+        
+        var localizedDescription: String {
+            let genericMessage = "Error while trying to initialize an instance of ModularDefinition from a CKRecord:"
+            let specificReason: String
+            switch self {
+            case let .missingField(fieldName):
+                specificReason = "missing field '\(fieldName)' on CKRecord."
+            case let .fieldTypeMismatch(fieldName, expectedType, foundType):
+                specificReason = "field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
+            case let .missingDatabase(fieldName):
+                specificReason = "missing database to fetch relationship '\(fieldName)'."
+            case let .errorDecodingNestedField(fieldName, error):
+                specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
+            }
+            return "\(genericMessage) \(specificReason)"
+        }
+    }
+}
+
+let m = ModularDefinition(integer: 11)
+let c = m.convertToCKRecord()
+do {
+    let m2 = try await ModularDefinition(from: c)
+    print(m2.integer)
+} catch {
+    print(error)
+}
