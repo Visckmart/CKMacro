@@ -90,7 +90,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
             """,
             """
-            func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) -> CKRecord {
+            func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) -> (CKRecord, [CKRecord]) {
+                var relationshipRecords: [CKRecord] = []
                 var record: CKRecord
                 if let baseRecord {
                     record = baseRecord
@@ -106,7 +107,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     delegate.willFinishEncoding(ckRecord: record)
                 }
                 
-                return record
+                return (record, relationshipRecords)
             }
             """,
             """
@@ -309,7 +310,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     /// Relationship `\#(name)`
                     if let \#(name) {
                         let childRecord = \#(name).convertToCKRecord()
-                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: \#(declaration.3!))
+                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
+                        relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                     }
                     
                     """#
@@ -317,8 +319,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     enc = #"""
                     /// Relationship `\#(name)`
                     let childRecord = \#(name).convertToCKRecord()
-                    record["\#(name)"] = CKRecord.Reference(recordID: childRecord.recordID, action: \#(declaration.3!))
-                    
+                    record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
+                    relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                     """#
                 }
             } else {

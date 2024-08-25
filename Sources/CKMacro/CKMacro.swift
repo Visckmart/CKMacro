@@ -10,10 +10,30 @@ public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(m
 import CloudKit
 
 public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
-    func convertToCKRecord(usingBaseCKRecord: CKRecord?) -> CKRecord
+    func convertToCKRecord(usingBaseCKRecord: CKRecord?) -> (CKRecord, [CKRecord])
     init(from ckRecord: CKRecord, fetchingNestedRecordsFrom: CKDatabase?) async throws
+    func save(toDatabase database: CKDatabase, usingBaseCKRecord: CKRecord?) async throws
 }
 
+public extension SynthesizedCKRecordConvertible {
+    func save(toDatabase database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
+        let (ckRecord, relationshipRecords) = self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
+        if #available(macOS 12.0, *) {
+            try await database.modifyRecords(
+                saving: [ckRecord] + relationshipRecords,
+                deleting: [],
+                savePolicy: .allKeys,
+                atomically: true
+            )
+            print("modified")
+        } else {
+            try await database.save(ckRecord)
+            for relationshipRecord in relationshipRecords {
+                try await database.save(relationshipRecord)
+            }
+        }
+    }
+}
 public protocol CKRecordSynthetizationDelegate: SynthesizedCKRecordConvertible {
     func willFinishEncoding(ckRecord: CKRecord)
     func willFinishDecoding(ckRecord: CKRecord)
