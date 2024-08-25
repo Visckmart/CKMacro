@@ -80,7 +80,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     Swift.type(of: v as Any)
                 }
                 
-                self.__recordID = ckRecord.recordID
+                self.__recordID = CKRecord.CodableID(ckRecord.recordID)
                 
                 \(decodingCodeBlock)
                 
@@ -96,7 +96,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 if let baseRecord {
                     record = baseRecord
                 } else if let __recordID {
-                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
+                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID.value)
                 } else {
                     record = CKRecord(recordType: \(raw: recordTypeName))
                 }
@@ -111,7 +111,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
             """,
             """
-            var __recordID: CKRecord.ID?
+            static let __recordType: String = \(raw: recordTypeName)
+            var __recordID: CKRecord.CodableID?
             """,
             #"""
             enum CKRecordDecodingError: Error {

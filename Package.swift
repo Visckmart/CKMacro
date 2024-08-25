@@ -6,7 +6,7 @@ import CompilerPluginSupport
 
 let package = Package(
     name: "CKMacro",
-    platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v13), .watchOS(.v6), .macCatalyst(.v13)],
+    platforms: [.macOS(.v12), .iOS(.v15), .tvOS(.v15), .watchOS(.v8), .macCatalyst(.v15)],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
