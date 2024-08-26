@@ -377,49 +377,54 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 """#
             } else if declaration.2.hasPrefix("@CKReference") {
-                
-                //throw StaticParserError("\(declaration.4)")
-                //AttributeListSyntax
-                //╰─[0]: AttributeSyntax
-                //├─atSign: atSign
-                //├─attributeName: IdentifierTypeSyntax
-                //│ ╰─name: identifier("CKReference")
-                //├─leftParen: leftParen
-                //├─arguments: LabeledExprListSyntax
-                //│ ╰─[0]: LabeledExprSyntax
-                //│   ╰─expression: MemberAccessExprSyntax
-                //│     ├─period: period
-                //│     ╰─declName: DeclReferenceExprSyntax
-                //│       ╰─baseName: identifier("isReferencedByProperty")
-                //╰─rightParen: rightParen
                 let isOptional = type?.trimmedDescription.hasSuffix("?") ?? false || type?.trimmedDescription.hasPrefix("Optional<") ?? false
                 let referenceType = declaration.4?.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
                 var action = ""
                 if referenceType == "referencesProperty" {
-                    throw StaticParserError("Not implemented")
+                    action = ".none"
                 } else if referenceType == "isReferencedByProperty" {
                     action = ".deleteSelf"
                 }
-//                throw StaticParserError(referenceType ?? "?")
-                if isOptional {
-                    enc = #"""
-                    /// Relationship `\#(name)`
-                    if let \#(name) {
+                if referenceType == "referencesProperty" {
+                    if isOptional {
+                        enc = #"""
+                        /// Relationship `\#(name)`
+                        if let \#(name) {
+                            let childRecord = \#(name).convertToCKRecord()
+                            record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action:   \#(action))
+                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        }
+                        
+                        """#
+                    } else {
+                        enc = #"""
+                        /// Relationship `\#(name)`
+                        let childRecord = \#(name).convertToCKRecord()
+                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(action))
+                        relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        """#
+                    }
+                } else {
+                    if isOptional {
+                        enc = #"""
+                        /// Relationship `\#(name)`
+                        if let \#(name) {
+                            let childRecord = \#(name).convertToCKRecord()
+                            childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
+                            //record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
+                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        }
+                        
+                        """#
+                    } else {
+                        enc = #"""
+                        /// Relationship `\#(name)`
                         let childRecord = \#(name).convertToCKRecord()
                         childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
                         //record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        """#
                     }
-                    
-                    """#
-                } else {
-                    enc = #"""
-                    /// Relationship `\#(name)`
-                    let childRecord = \#(name).convertToCKRecord()
-                    childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
-                    //record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
-                    relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
-                    """#
                 }
             } else {
                 enc = #"record["\#(name)"] = self.\#(name)"#
