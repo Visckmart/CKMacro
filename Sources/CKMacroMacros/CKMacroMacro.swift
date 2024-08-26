@@ -54,7 +54,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
             }
         }
-        
+        declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
+        let recordNameProperties = declarationInfo.filter { $0.2 == "@CKRecordName" }
+        guard recordNameProperties.count <= 1 else {
+            fatalError()
+        }
+        guard let recordNameProperty = recordNameProperties.first?.0.identifier.trimmed.text else {
+            fatalError()
+        }
         let encodingCodeBlock = makeEncodingDeclarations(forDeclarations: declarationInfo)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD)
         
@@ -63,12 +70,13 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
         
         return [
-            #"""
-            //func type<T: CKRecordValue>(of v: T?) -> (any Any.Type)? { v.flatMap { type(of: $0 as Any) } }
-            var x = """
-            \#(raw: declaration.attributes.map(\.description))
-            """
-            """#,
+//            #"""
+//            //func type<T: CKRecordValue>(of v: T?) -> (any Any.Type)? { v.flatMap { type(of: $0 as Any) } }
+//            //var x = """
+//            //(raw: declaration.attributes.map(\.description))
+//            \#(raw: declarationInfo.map { ($0.2, $0.0.identifier.trimmed.text) }.map {"//\($0)"}.joined(separator: "\n"))
+//            //"""
+//            """#,
             """
             
             required init(from ckRecord: CKRecord, fetchingNestedRecordsFrom database: CKDatabase? = nil) async throws {
@@ -83,10 +91,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     Swift.type(of: v as Any)
                 }
                 
-                self.__recordID = CKRecord.CodableID(ckRecord.recordID)
+                //self.__recordID = CKRecord.CodableID(ckRecord.recordID)
+                self.\(raw: recordNameProperty) = ckRecord.recordID.recordName
                 
                 \(decodingCodeBlock)
-                
+                //self.email = ckRecord.recordID.recordName
                 if let delegate = self as? CKRecordSynthetizationDelegate {
                     delegate.willFinishDecoding(ckRecord: ckRecord)
                 }
@@ -115,7 +124,28 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             """,
             """
             static let __recordType: String = \(raw: recordTypeName)
-            var __recordID: CKRecord.CodableID?
+            var __recordID: CKRecord.CodableID? {
+                get {
+                    guard let name = self.__recordName else { return nil }    
+                    return CKRecord.CodableID(
+                        CKRecord.ID(recordName: name/*, zoneID: self.__recordZoneID ?? CKRecordZone.default().zoneID*/)
+                    )
+                }
+                set {
+                    self.__recordName = newValue?.recordName
+                    //self.__recordZoneID = newValue?.zoneID
+                }
+            }
+            var __recordName: String?
+            {
+                get {
+                    self.\(raw: recordNameProperty)
+                }
+                set {
+                    self.\(raw: recordNameProperty) = newValue
+                }
+            }
+            //var __recordZoneID: CKRecordZone.ID?
             """,
             #"""
             enum CKRecordDecodingError: Error {
@@ -364,18 +394,24 @@ extension String {
     }
 }
 
-
-
 public struct RelationshipMarkerMacro: PeerMacro {
     public static func expansion(of node: AttributeSyntax, providingPeersOf declaration: some DeclSyntaxProtocol, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
         []
     }
 }
 
+public struct CKRecordNameMacro: PeerMacro {
+    public static func expansion(of node: AttributeSyntax, providingPeersOf declaration: some DeclSyntaxProtocol, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
+        []
+    }
+}
+
+
 @main
 struct CKMacroPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ConvertibleToCKRecordMacro.self,
-        RelationshipMarkerMacro.self
+        RelationshipMarkerMacro.self,
+        CKRecordNameMacro.self
     ]
 }

@@ -1,7 +1,7 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 
-@attached(member, names: named(x), named(convertToCKRecord), named(init(from:fetchingNestedRecordsFrom:)), named(CKRecordDecodingError), named(__recordID), named(__recordType))
+@attached(member, names: named(x), named(convertToCKRecord), named(init(from:fetchingNestedRecordsFrom:)), named(CKRecordDecodingError), named(__recordID), named(__recordType), named(__recordZoneID), named(__recordName))
 @attached(extension, conformances: SynthesizedCKRecordConvertible)
 public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(module: "CKMacroMacros", type: "ConvertibleToCKRecordMacro")
 
@@ -72,7 +72,10 @@ public extension CKRecordSynthetizationDelegate {
 
 public protocol CKIdentifiable {
     var __recordID: CKRecord.CodableID? { get set }
+    var __recordName: String? { get set }
+//    var __recordZoneID: CKRecordZone.ID? { get set }
 }
+
 @dynamicMemberLookup
 public struct MyID: Codable {
     public var value: CKRecord.ID
@@ -123,10 +126,10 @@ extension CKRecord {
     public typealias CodableID = MyID
 }
 
-
 @attached(peer)
 public macro CKReference(action: CKRecord.ReferenceAction) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
-
+@attached(peer)
+public macro CKRecordName() = #externalMacro(module: "CKMacroMacros", type: "CKRecordNameMacro")
 //@attached(peer)
 //public macro CKEncode(with: (CKRecord) -> CKRecordValue) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro2")
 //
