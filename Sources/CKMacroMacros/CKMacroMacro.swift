@@ -88,7 +88,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
             }
         }
-        declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
+        
         let recordNameProperties = declarationInfo.filter { $0.2 == "@CKRecordName" }
         guard recordNameProperties.count <= 1 else {
             throw CustomError.message("There can only be one property marked with @CKRecordName")
@@ -105,6 +105,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             throw CustomError.message("The property marked with @CKRecordName should have type Optional<Int>; '\(recordNameProperty)' is a \(type)")
 //            throw CustomError.message("The property '\(recordNameProperty)' was marked with @CKRecordName but is not of type Optional<String>")
         }
+        declarationInfo = declarationInfo.filter { $0.2 != "@CKRecordName" }
+        declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
         let encodingCodeBlock = makeEncodingDeclarations(forDeclarations: declarationInfo)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD)
 //        context.diagnose(StaticPar)
@@ -169,7 +171,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             static let __recordType: String = \(raw: recordTypeName)
             var __recordID: CKRecord.CodableID? {
                 get {
-                    guard let name = self.__recordName else { return nil }    
+                    guard let name = self.__recordName, !name.isEmpty else { return nil }    
                     return CKRecord.CodableID(
                         CKRecord.ID(recordName: name/*, zoneID: self.__recordZoneID ?? CKRecordZone.default().zoneID*/)
                     )

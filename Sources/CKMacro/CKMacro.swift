@@ -18,6 +18,7 @@ public extension SynthesizedCKRecordConvertible {
     func save(toDatabase database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
         let (ckRecord, relationshipRecords) = self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
+//            dump(ckRecord)
             try await database.modifyRecords(
                 saving: [ckRecord] + relationshipRecords,
                 deleting: [],
