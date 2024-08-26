@@ -2,10 +2,44 @@ import SwiftCompilerPlugin
 import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
+import SwiftDiagnostics
 
 
+enum CustomError: Error, CustomStringConvertible {
+    case message(String)
+    
+    var description: String {
+        switch self {
+        case .message(let text):
+            return text
+        }
+    }
+}
+
+/// A parser error with a static message.
+public struct StaticParserError: Error, DiagnosticMessage {
+    public let message: String
+    private let messageID: String
+    
+    /// This should only be called within a static var on DiagnosticMessage, such
+    /// as the examples below. This allows us to pick up the messageID from the
+    /// var name.
+    fileprivate init(_ message: String, messageID: String = #function) {
+        self.message = message
+        self.messageID = messageID
+    }
+    
+    public var diagnosticID: MessageID {
+        MessageID(domain: "ckmacro", id: "\(type(of: self)).\(messageID)")
+    }
+    
+    public var severity: DiagnosticSeverity { .error }
+}
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
+//    enum MacroError {
+//        case noRecordNameSpecified
+//    }
     typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String, String?)
     
     static let specialFields: [String: String] = [
@@ -57,14 +91,23 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
         let recordNameProperties = declarationInfo.filter { $0.2 == "@CKRecordName" }
         guard recordNameProperties.count <= 1 else {
-            fatalError()
+            throw CustomError.message("There can only be one property marked with @CKRecordName")
+//            context.diagnose(Diagnostic(node: node, message: StaticParserError("Missing @CKRecordName")))
+//            fatalError()
         }
-        guard let recordNameProperty = recordNameProperties.first?.0.identifier.trimmed.text else {
-            fatalError()
+        guard let recordNamePropertyFull = recordNameProperties.first else {
+//            fatalError()
+            throw CustomError.message("At least one property needs to be marked with @CKRecordName")
+        }
+        let recordNameProperty = recordNamePropertyFull.0.identifier.trimmed.text
+        let type = recordNamePropertyFull.1!.type.trimmedDescription
+        guard type == "String?" || type == "Optional<String>" else {
+            throw CustomError.message("The property marked with @CKRecordName should have type Optional<Int>; '\(recordNameProperty)' is a \(type)")
+//            throw CustomError.message("The property '\(recordNameProperty)' was marked with @CKRecordName but is not of type Optional<String>")
         }
         let encodingCodeBlock = makeEncodingDeclarations(forDeclarations: declarationInfo)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD)
-        
+//        context.diagnose(StaticPar)
         let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
         let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text
         let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
