@@ -63,9 +63,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
         
         return [
-            """
+            #"""
             //func type<T: CKRecordValue>(of v: T?) -> (any Any.Type)? { v.flatMap { type(of: $0 as Any) } }
-            """,
+            var x = """
+            \#(raw: declaration.attributes.map(\.description))
+            """
+            """#,
             """
             
             required init(from ckRecord: CKRecord, fetchingNestedRecordsFrom database: CKDatabase? = nil) async throws {

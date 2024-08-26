@@ -34,7 +34,24 @@ public extension SynthesizedCKRecordConvertible {
     }
     
     
-    
+    static func fecthAll(fromDatabase database: CKDatabase) async throws -> [Self] {
+        let query = CKQuery(recordType: Self.__recordType, predicate: NSPredicate(value: true))
+        var (response, cursor) = try await database.records(matching: query)
+        
+        
+        var decodedResults = [Self]()
+        repeat {
+            let fetchedRecords = response.compactMap({ try? $0.1.get() })
+            for record in fetchedRecords {
+                let newInstance = try await Self(from: record, fetchingNestedRecordsFrom: database)
+                decodedResults.append(newInstance)
+            }
+            if let currentCursor = cursor {
+                (response, cursor) = try await database.records(continuingMatchFrom: currentCursor)
+            }
+        } while cursor != nil
+        return decodedResults
+    }
 }
 extension SynthesizedCKRecordConvertible where Self: Codable {
     public static func fetch(fromDatabase database: CKDatabase, key: CodingKey, value: NSObject) async throws -> (matchResults: [(CKRecord.ID, Result<CKRecord, any Error>)], queryCursor: CKQueryOperation.Cursor?) {
