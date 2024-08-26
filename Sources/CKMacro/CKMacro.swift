@@ -18,7 +18,7 @@ public extension SynthesizedCKRecordConvertible {
     func save(toDatabase database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
         let (ckRecord, relationshipRecords) = self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
-//            dump(ckRecord)
+            dump(relationshipRecords)
             try await database.modifyRecords(
                 saving: [ckRecord] + relationshipRecords,
                 deleting: [],
@@ -127,8 +127,14 @@ extension CKRecord {
     public typealias CodableID = MyID
 }
 
+public enum ReferenceType {
+    case referencesProperty
+    case isReferencedByProperty(weakReference: Bool)
+//    case isStronglyReferencedByProperty
+    public static let isReferencedByProperty = isReferencedByProperty(weakReference: true)
+}
 @attached(peer)
-public macro CKReference(action: CKRecord.ReferenceAction) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
+public macro CKReference(_ referenceType: ReferenceType) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
 @attached(peer)
 public macro CKRecordName() = #externalMacro(module: "CKMacroMacros", type: "CKRecordNameMacro")
 //@attached(peer)
