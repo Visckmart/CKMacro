@@ -103,15 +103,20 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //            context.diagnose(Diagnostic(node: node, message: StaticParserError("Missing @CKRecordName")))
 //            fatalError()
         }
+        
         guard let recordNamePropertyFull = recordNameProperties.first else {
 //            fatalError()
             throw CustomError.message("At least one property needs to be marked with @CKRecordName")
         }
         let recordNameProperty = recordNamePropertyFull.0.identifier.trimmed.text
-        let type = recordNamePropertyFull.1!.type.trimmedDescription
-        guard type == "String?" || type == "Optional<String>" else {
-            throw CustomError.message("The property marked with @CKRecordName should have type Optional<Int>; '\(recordNameProperty)' is a \(type)")
-//            throw CustomError.message("The property '\(recordNameProperty)' was marked with @CKRecordName but is not of type Optional<String>")
+        let recordNameType = recordNamePropertyFull.1!.type.trimmedDescription
+        let recordNameIsOptional = recordNameType.hasSuffix("?") || recordNameType.hasPrefix("Optional<")
+//        guard recordNameType == "String?" || recordNameType == "Optional<String>" else {
+//            throw CustomError.message("The property marked with @CKRecordName should have type Optional<Int>; '\(recordNameProperty)' is a \(type)")
+////            throw CustomError.message("The property '\(recordNameProperty)' was marked with @CKRecordName but is not of type Optional<String>")
+//        }
+        guard recordNameIsOptional == false else {
+            throw CustomError.message("ID can't be an optional")
         }
         let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
         let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text
@@ -160,10 +165,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 var record: CKRecord
                 if let baseRecord {
                     record = baseRecord
-                } else if let __recordID {
-                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID.value)
                 } else {
-                    record = CKRecord(recordType: \(raw: recordTypeName))
+                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID.value)
                 }
                 
                 \(encodingCodeBlock)
@@ -177,19 +180,17 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             """,
             """
             static let __recordType: String = \(raw: recordTypeName)
-            var __recordID: CKRecord.CodableID? {
+            var __recordID: CKRecord.CodableID {
                 get {
-                    guard let name = self.__recordName, !name.isEmpty else { return nil }    
                     return CKRecord.CodableID(
-                        CKRecord.ID(recordName: name/*, zoneID: self.__recordZoneID ?? CKRecordZone.default().zoneID*/)
+                        CKRecord.ID(recordName: self.__recordName)
                     )
                 }
                 set {
-                    self.__recordName = newValue?.recordName
-                    //self.__recordZoneID = newValue?.zoneID
+                    self.__recordName = newValue.recordName
                 }
             }
-            var __recordName: String?
+            var __recordName: String
             {
                 get {
                     self.\(raw: recordNameProperty)
@@ -198,7 +199,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     self.\(raw: recordNameProperty) = newValue
                 }
             }
-            //var __recordZoneID: CKRecordZone.ID?
             """,
             #"""
             enum CKRecordDecodingError: Error {

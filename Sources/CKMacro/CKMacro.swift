@@ -75,8 +75,8 @@ public extension CKRecordSynthetizationDelegate {
 }
 
 public protocol CKIdentifiable {
-    var __recordID: CKRecord.CodableID? { get set }
-    var __recordName: String? { get set }
+    var __recordID: CKRecord.CodableID { get set }
+    var __recordName: String { get set }
 //    var __recordZoneID: CKRecordZone.ID? { get set }
 }
 
