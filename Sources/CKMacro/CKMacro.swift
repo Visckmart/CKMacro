@@ -15,7 +15,7 @@ public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
 }
 
 public extension SynthesizedCKRecordConvertible {
-    mutating func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
+    func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
         let (ckRecord, relationshipRecords) = self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
             let (saveResults, _) = try await database.modifyRecords(
@@ -24,13 +24,11 @@ public extension SynthesizedCKRecordConvertible {
                 savePolicy: .allKeys,
                 atomically: true
             )
-            self.__recordName = ckRecord.recordID.recordName
         } else {
-            let savedRecord = try await database.save(ckRecord)
+            try await database.save(ckRecord)
             for relationshipRecord in relationshipRecords {
                 try await database.save(relationshipRecord)
             }
-            self.__recordName = savedRecord.recordID.recordName
         }
     }
     
@@ -76,8 +74,8 @@ public extension CKRecordSynthetizationDelegate {
 }
 
 public protocol CKIdentifiable {
-    var __recordID: CKRecord.CodableID { get set }
-    var __recordName: String { get set }
+    var __recordID: CKRecord.CodableID { get }
+    var __recordName: String { get }
 //    var __recordZoneID: CKRecordZone.ID? { get set }
 }
 

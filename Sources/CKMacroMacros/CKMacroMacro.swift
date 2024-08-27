@@ -40,7 +40,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //    enum MacroError {
 //        case noRecordNameSpecified
 //    }
-    typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String, String?, AttributeListSyntax?)
+    typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String, String?, VariableDeclSyntax?)
     
     static let specialFields: [String: String] = [
         "creationDate": "Date?",
@@ -86,11 +86,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //                    """#
 //                    ]
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
-                        declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, member.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmedDescription, member.attributes))
+                        declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, member.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmedDescription, member))
                         if member.bindingSpecifier.tokenKind != .keyword(.let) || binding.initializer == nil {
 //                            let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
                             
-                            declarationInfoD.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, nil, member.attributes))
+                            declarationInfoD.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, nil, member))
                         }
                     }
                 }
@@ -125,6 +125,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
         let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: declarationInfo, mainName: recordTypeName)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD, mainName: recordTypeName)
+//        let curr = className?.hasSuffix("m") ?? false
+        let recordNameGetOnly = recordNamePropertyFull.4?.bindingSpecifier.text == "let"
+//        if curr {
+//            throw StaticParserError("\(recordNamePropertyFull.4?.bindingSpecifier.text)")
+//        }
 //        context.diagnose(StaticPar)
         
         return [
@@ -178,7 +183,26 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 return (record, relationshipRecords)
             }
             """,
+            
+            recordNameGetOnly ?
             """
+            static let __recordType: String = \(raw: recordTypeName)
+            var __recordID: CKRecord.CodableID {
+                get {
+                    return CKRecord.CodableID(
+                        CKRecord.ID(recordName: self.__recordName)
+                    )
+                }
+            }
+            var __recordName: String
+            {
+                get {
+                    self.\(raw: recordNameProperty)
+                }
+            }
+            """
+            :
+                """
             static let __recordType: String = \(raw: recordTypeName)
             var __recordID: CKRecord.CodableID {
                 get {
@@ -386,7 +410,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#
             } else if declaration.2.hasPrefix("@CKReference") {
                 let isOptional = type?.trimmedDescription.hasSuffix("?") ?? false || type?.trimmedDescription.hasPrefix("Optional<") ?? false
-                let referenceType = declaration.4?.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
+                let referenceType = declaration.4?.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
                 var action = ""
                 if referenceType == "referencesProperty" {
                     action = ".none"
