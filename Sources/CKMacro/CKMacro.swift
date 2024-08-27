@@ -1,7 +1,7 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 
-@attached(member, names: named(x), named(convertToCKRecord), named(init(from:fetchingNestedRecordsFrom:)), named(CKRecordDecodingError), named(__recordID), named(__recordType), named(__recordZoneID), named(__recordName))
+@attached(member, names: named(x), named(convertToCKRecord), named(init(fromCKRecord:fetchingRelationshipsFrom:)), named(CKRecordDecodingError), named(__recordID), named(__recordType), named(__recordZoneID), named(__recordName))
 @attached(extension, conformances: SynthesizedCKRecordConvertible)
 public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(module: "CKMacroMacros", type: "ConvertibleToCKRecordMacro")
 
@@ -9,36 +9,37 @@ import CloudKit
 
 public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
     func convertToCKRecord(usingBaseCKRecord: CKRecord?) -> (CKRecord, [CKRecord])
-    init(from ckRecord: CKRecord, fetchingNestedRecordsFrom: CKDatabase?) async throws
-    mutating func save(toDatabase database: CKDatabase, usingBaseCKRecord: CKRecord?) async throws
+    init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom: CKDatabase?) async throws
+    mutating func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord: CKRecord?) async throws
     static var __recordType: String { get }
 }
 
 public extension SynthesizedCKRecordConvertible {
-    mutating func save(toDatabase database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
+    mutating func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
         let (ckRecord, relationshipRecords) = self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
-            dump(relationshipRecords)
             let (saveResults, _) = try await database.modifyRecords(
                 saving: [ckRecord] + relationshipRecords,
                 deleting: [],
                 savePolicy: .allKeys,
                 atomically: true
             )
-            print(ckRecord.recordID, self.__recordName)
             self.__recordName = ckRecord.recordID.recordName
-            print("modified")
         } else {
-            let r = try await database.save(ckRecord)
+            let savedRecord = try await database.save(ckRecord)
             for relationshipRecord in relationshipRecords {
                 try await database.save(relationshipRecord)
             }
-            self.__recordName = r.recordID.recordName
+            self.__recordName = savedRecord.recordID.recordName
         }
     }
     
+    static func fecth(withRecordName recordName: String, fromCKDatabase database: CKDatabase) async throws -> Self {
+        let fetchedRecord = try await database.record(for: CKRecord.ID(recordName: recordName))
+        return try await Self(fromCKRecord: fetchedRecord, fetchingRelationshipsFrom: database)
+    }
     
-    static func fecthAll(fromDatabase database: CKDatabase) async throws -> [Self] {
+    static func fecthAll(fromCKDatabase database: CKDatabase) async throws -> [Self] {
         let query = CKQuery(recordType: Self.__recordType, predicate: NSPredicate(value: true))
         var (response, cursor) = try await database.records(matching: query)
         
@@ -47,7 +48,7 @@ public extension SynthesizedCKRecordConvertible {
         repeat {
             let fetchedRecords = response.compactMap({ try? $0.1.get() })
             for record in fetchedRecords {
-                let newInstance = try await Self(from: record, fetchingNestedRecordsFrom: database)
+                let newInstance = try await Self(fromCKRecord: record, fetchingRelationshipsFrom: database)
                 decodedResults.append(newInstance)
             }
             if let currentCursor = cursor {

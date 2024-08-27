@@ -137,7 +137,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //            """#,
             """
             
-            required init(from ckRecord: CKRecord, fetchingNestedRecordsFrom database: CKDatabase? = nil) async throws {
+            required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws {
                 func unwrappedType<T>(of value: T) -> Any.Type {
                     if let ckRecordValue = value as? CKRecordValue {
                         ckRecordTypeOf(of: ckRecordValue)
@@ -302,7 +302,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             throw CKRecordDecodingError.missingField("erro curriculum")
                         }
                         if let record = \#(name)FetchedRecords.first {
-                            \#(name) = try await \#(filteredType)(from: record, fetchingNestedRecordsFrom: database)
+                            \#(name) = try await \#(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: database)
                         }
                     } catch CKError.invalidArguments {
                         print("invalid arguments")
@@ -315,7 +315,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                     }
                     let \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
-                    let \#(name) = try await \#(filteredType)(from: \#(name)Record)
+                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: database)
                     self.\#(name) = \#(name)
                     
                     """#
