@@ -171,7 +171,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 if let baseRecord {
                     record = baseRecord
                 } else {
-                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID.value)
+                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
                 }
                 
                 \(encodingCodeBlock)
@@ -187,11 +187,9 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             recordNameGetOnly ?
             """
             static let __recordType: String = \(raw: recordTypeName)
-            var __recordID: CKRecord.CodableID {
+            var __recordID: CKRecord.ID {
                 get {
-                    return CKRecord.CodableID(
-                        CKRecord.ID(recordName: self.__recordName)
-                    )
+                    return CKRecord.ID(recordName: self.__recordName)
                 }
             }
             var __recordName: String
@@ -204,11 +202,9 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             :
                 """
             static let __recordType: String = \(raw: recordTypeName)
-            var __recordID: CKRecord.CodableID {
+            var __recordID: CKRecord.ID {
                 get {
-                    return CKRecord.CodableID(
-                        CKRecord.ID(recordName: self.__recordName)
-                    )
+                    return CKRecord.ID(recordName: self.__recordName)
                 }
                 set {
                     self.__recordName = newValue.recordName

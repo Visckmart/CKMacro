@@ -74,59 +74,9 @@ public extension CKRecordSynthetizationDelegate {
 }
 
 public protocol CKIdentifiable {
-    var __recordID: CKRecord.CodableID { get }
+    var __recordID: CKRecord.ID { get }
     var __recordName: String { get }
 //    var __recordZoneID: CKRecordZone.ID? { get set }
-}
-
-@dynamicMemberLookup
-public struct MyID: Codable {
-    public var value: CKRecord.ID
-    
-    public init(_ recordID: CKRecord.ID) {
-        value = recordID
-    }
-    
-    private enum CodingKeys: CodingKey {
-        case data
-    }
-    
-    public subscript<T>(dynamicMember keyPath: KeyPath<CKRecord.ID, T>) -> T {
-        get { self.value[keyPath: keyPath] }
-    }
-    public init(from decoder: any Decoder) throws {
-        let container: KeyedDecodingContainer<MyID.CodingKeys> = try decoder.container(keyedBy: MyID.CodingKeys.self)
-        
-        let partialData = try container.decode(Data.self, forKey: MyID.CodingKeys.data)
-        self.value = try NSKeyedUnarchiver.unarchivedObject(ofClass: CKRecord.ID.self, from: partialData)!
-    }
-    
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: MyID.CodingKeys.self)
-        
-        let identifierData = try NSKeyedArchiver.archivedData(withRootObject: value, requiringSecureCoding: false)
-        try container.encode(identifierData, forKey: .data)
-    }
-    //    func encode(to encoder: any Encoder) throws {
-    //        var container = encoder.container(keyedBy: CodingKeys.self)
-    //
-    //        let identifierData = try NSKeyedArchiver.archivedData(withRootObject: data, requiringSecureCoding: false)
-    //        try container.encode(identifierData, forKey: .data)
-    //    }
-    //    init(from decoder: any Decoder) throws {
-    //        let container = decoder.container(keyedBy: CodingKeys.self)
-    //    }
-    //    func decoding() {
-    //        favoriteColor = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(colorData) as? Self
-    //    }
-    //    func encoding() throws -> Data {
-    //        try NSKeyedArchiver.archivedData(withRootObject: data, requiringSecureCoding: false)
-    //    }
-}
-
-
-extension CKRecord {
-    public typealias CodableID = MyID
 }
 
 public enum ReferenceType {
