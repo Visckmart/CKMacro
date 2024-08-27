@@ -4,7 +4,7 @@ import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 import SwiftDiagnostics
 
-
+import CloudKit
 enum CustomError: Error, CustomStringConvertible {
     case message(String)
     
@@ -159,14 +159,18 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 \(decodingCodeBlock)
                 //self.email = ckRecord.recordID.recordName
-                if let delegate = self as? CKRecordSynthetizationDelegate {
-                    delegate.willFinishDecoding(ckRecord: ckRecord)
+                if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
+                    try delegate.willFinishDecoding(ckRecord: ckRecord)
                 }
             }
             """,
             """
-            func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) -> (CKRecord, [CKRecord]) {
+            func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) throws -> (CKRecord, [CKRecord]) {
                 var relationshipRecords: [CKRecord] = []
+                relationshipRecords = []
+                guard self.__recordName.isEmpty == false else {
+                    throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNameProperty))
+                }
                 var record: CKRecord
                 if let baseRecord {
                     record = baseRecord
@@ -176,8 +180,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 \(encodingCodeBlock)
                 
-                if let delegate = self as? CKRecordSynthetizationDelegate {
-                    delegate.willFinishEncoding(ckRecord: record)
+                if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
+                    try delegate.willFinishEncoding(ckRecord: record)
                 }
                 
                 return (record, relationshipRecords)
@@ -220,6 +224,20 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
             }
             """,
+            #"""
+            enum CKRecordEncodingError: Error {
+                case emptyRecordName(fieldName: String)
+            
+                var localizedDescription: String {
+                    switch self {
+                    case .emptyRecordName(let fieldName):
+                        return "Error when trying to encode instance of \#(raw: className ?? "") to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
+                        //return "Unable to instantiate CKRecord: property '\(fieldName)' is used as the recordName, so it can't be empty."
+                        //return "Unable to instantiate CKRecord: recordName is set to property '\(fieldName)', so it can't be empty."
+                    }
+                }
+            }
+            """#,
             #"""
             enum CKRecordDecodingError: Error {
                 
@@ -418,7 +436,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         enc = #"""
                         /// Relationship `\#(name)`
                         if let \#(name) {
-                            let childRecord = \#(name).convertToCKRecord()
+                            let childRecord = try \#(name).convertToCKRecord()
                             record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action:   \#(action))
                             relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                         }
@@ -427,7 +445,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     } else {
                         enc = #"""
                         /// Relationship `\#(name)`
-                        let childRecord = \#(name).convertToCKRecord()
+                        let childRecord = try \#(name).convertToCKRecord()
                         record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(action))
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                         """#
@@ -437,7 +455,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         enc = #"""
                         /// Relationship `\#(name)`
                         if let \#(name) {
-                            let childRecord = \#(name).convertToCKRecord()
+                            let childRecord = try \#(name).convertToCKRecord()
                             childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
                             //record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
                             relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
@@ -447,7 +465,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     } else {
                         enc = #"""
                         /// Relationship `\#(name)`
-                        let childRecord = \#(name).convertToCKRecord()
+                        let childRecord = try \#(name).convertToCKRecord()
                         childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
                         //record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
@@ -455,6 +473,17 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                 }
             } else {
+//                enc = #"""
+//                if let \#(name)A = \#(name) as? CKRecordValue { 
+//                    record["\#(name)"] = \#(name)A
+//                }
+//                """#
+//                if let type {
+//                    let c = NSClassFromString(type.trimmedDescription)
+//                    if c as? CKRecordValue != nil {
+//                        throw StaticParserError("'\(name)' is not CKRecordValue")
+//                    }
+//                }
                 enc = #"record["\#(name)"] = self.\#(name)"#
                 //                enc = #"record.setValue(self.\#(name), forKey: "\#(name)")"#
             }

@@ -1,14 +1,14 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 
-@attached(member, names: named(x), named(convertToCKRecord), named(init(fromCKRecord:fetchingRelationshipsFrom:)), named(CKRecordDecodingError), named(__recordID), named(__recordType), named(__recordZoneID), named(__recordName))
+@attached(member, names: named(x), named(convertToCKRecord), named(init(fromCKRecord:fetchingRelationshipsFrom:)), named(CKRecordDecodingError), named(__recordID), named(__recordType), named(__recordZoneID), named(__recordName), named(CKRecordEncodingError))
 @attached(extension, conformances: SynthesizedCKRecordConvertible)
 public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(module: "CKMacroMacros", type: "ConvertibleToCKRecordMacro")
 
 import CloudKit
 
 public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
-    func convertToCKRecord(usingBaseCKRecord: CKRecord?) -> (CKRecord, [CKRecord])
+    func convertToCKRecord(usingBaseCKRecord: CKRecord?) throws -> (CKRecord, [CKRecord])
     init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom: CKDatabase?) async throws
     mutating func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord: CKRecord?) async throws
     static var __recordType: String { get }
@@ -16,7 +16,7 @@ public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
 
 public extension SynthesizedCKRecordConvertible {
     func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
-        let (ckRecord, relationshipRecords) = self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
+        let (ckRecord, relationshipRecords) = try self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
             let (saveResults, _) = try await database.modifyRecords(
                 saving: [ckRecord] + relationshipRecords,
@@ -64,13 +64,13 @@ extension SynthesizedCKRecordConvertible where Self: Codable {
     }
 }
 public protocol CKRecordSynthetizationDelegate: SynthesizedCKRecordConvertible {
-    func willFinishEncoding(ckRecord: CKRecord)
-    func willFinishDecoding(ckRecord: CKRecord)
+    func willFinishEncoding(ckRecord: CKRecord) throws
+    func willFinishDecoding(ckRecord: CKRecord) throws
 }
 
 public extension CKRecordSynthetizationDelegate {
-    public func willFinishEncoding(ckRecord: CKRecord) { }
-    public func willFinishDecoding(ckRecord: CKRecord) { }
+    public func willFinishEncoding(ckRecord: CKRecord) throws { }
+    public func willFinishDecoding(ckRecord: CKRecord) throws { }
 }
 
 public protocol CKIdentifiable {
