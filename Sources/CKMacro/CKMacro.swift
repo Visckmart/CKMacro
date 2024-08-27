@@ -10,27 +10,30 @@ import CloudKit
 public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
     func convertToCKRecord(usingBaseCKRecord: CKRecord?) -> (CKRecord, [CKRecord])
     init(from ckRecord: CKRecord, fetchingNestedRecordsFrom: CKDatabase?) async throws
-    func save(toDatabase database: CKDatabase, usingBaseCKRecord: CKRecord?) async throws
+    mutating func save(toDatabase database: CKDatabase, usingBaseCKRecord: CKRecord?) async throws
     static var __recordType: String { get }
 }
 
 public extension SynthesizedCKRecordConvertible {
-    func save(toDatabase database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
+    mutating func save(toDatabase database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
         let (ckRecord, relationshipRecords) = self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
             dump(relationshipRecords)
-            try await database.modifyRecords(
+            let (saveResults, _) = try await database.modifyRecords(
                 saving: [ckRecord] + relationshipRecords,
                 deleting: [],
                 savePolicy: .allKeys,
                 atomically: true
             )
+            print(ckRecord.recordID, self.__recordName)
+            self.__recordName = ckRecord.recordID.recordName
             print("modified")
         } else {
-            try await database.save(ckRecord)
+            let r = try await database.save(ckRecord)
             for relationshipRecord in relationshipRecords {
                 try await database.save(relationshipRecord)
             }
+            self.__recordName = r.recordID.recordName
         }
     }
     

@@ -68,7 +68,15 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //                    let m = member.modifiers.com
 //                    let hasInitializer = binding.initializer != nil
 //                    let hasSetter = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.filter({$0.accessorSpecifier == .keyword(.set)}).isEmpty ?? false
-                    guard hasAccessor == false else { continue }
+                    let isStatic = member.modifiers.filter { $0.as(DeclModifierSyntax.self)?.name.trimmed.text == "static" }.isEmpty == false
+                    guard isStatic == false else { continue }
+//                    if binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.trimmed.text == "empty" {
+//                        throw StaticParserError("\(isStatic) \(member.modifiers.compactMap { $0.as(DeclModifierSyntax.self)?.name.trimmed.text })")
+//                    }
+                    let accessorSpecifiers = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.compactMap(\.accessorSpecifier)
+//                    let getSetAccessors: [TokenSyntax]? =
+                    let isComputed = (accessorSpecifiers?.filter({$0 == .keyword(.set) || $0 == .keyword(.get)}) ?? []).isEmpty == false
+                    guard isComputed == false else { continue }
 //                    return [
 //                    #"""
 //                    var b = """
