@@ -9,7 +9,7 @@ import XCTest
 import CKMacroMacros
 
 let testMacros: [String: Macro.Type] = [
-    "stringify": StringifyMacro.self,
+    "stringify": ConvertibleToCKRecordMacro.self,
 ]
 #endif
 

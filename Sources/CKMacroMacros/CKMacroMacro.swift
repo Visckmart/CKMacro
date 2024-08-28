@@ -97,9 +97,172 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
         let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: declarationInfo, mainName: recordTypeName)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD, mainName: recordTypeName)
+        
+        let initFromCKRecord = try InitializerDeclSyntax(
+            "required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws"
+        ) {
+            try makeTypeUnwrappingFunc()
+            
+            "self.\(raw: recordNameProperty) = ckRecord.recordID.recordName"
+            
+            decodingCodeBlock
+            
+            callWillFinishDecoding
+        }
+        
+        let convertToCKRecordSetup = try CodeBlockSyntax(
+            """
+            guard self.__recordName.isEmpty == false else {
+                throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNameProperty))
+            }
+            var record: CKRecord
+            if let baseRecord {
+                record = baseRecord
+            } else {
+                record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
+            }            
+            var relationshipRecords: [CKRecord] = []
+            relationshipRecords = []
+            """
+        )
+        
+        let methodConvertToCKRecord = try FunctionDeclSyntax(
+            "func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) throws -> (CKRecord, [CKRecord])"
+        ) {
+            """
+            \(convertToCKRecordSetup)
+            
+            \(encodingCodeBlock)
+            
+            \(callWillFinishEncoding)
+            
+            return (record, relationshipRecords)
+            """
+        }
+        
+        let recordProperties = try makeRecordProperties(
+            recordNameProperty: (name: recordNameProperty, type: recordTypeName),
+            getOnly: recordNameGetOnly
+        )
+        
+        let encodingAndDecodingDeclarations = [
+            DeclSyntax(initFromCKRecord),
+            DeclSyntax(methodConvertToCKRecord),
+        ]
+        
+        let errorEnums = try makeErrorEnums(className: className ?? "")
+        
+        return recordProperties + encodingAndDecodingDeclarations + errorEnums
+        
+    }
+    
+    static func makeErrorEnums(className: String) throws -> [DeclSyntax] {
+        [
+            try makeEncodingErrorEnum(className: className),
+            try makeDecodingErrorEnum(className: className)
+        ]
+    }
+    
+    static func makeTypeUnwrappingFunc() throws -> [DeclSyntax] {
+        let unwrappedTypeFunc = try FunctionDeclSyntax(
+            """
+            func unwrappedType<T>(of value: T) -> Any.Type {
+                if let ckRecordValue = value as? CKRecordValue {
+                    ckRecordTypeOf(of: ckRecordValue)
+                } else {
+                    Swift.type(of: value as Any)
+                }
+            }
+            """
+        )
+        
+        let ckRecordTypeOfFunc = try FunctionDeclSyntax(
+            """
+            func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
+                Swift.type(of: v as Any)
+            }
+            """
+        )
+        return [
+            DeclSyntax(unwrappedTypeFunc),
+            DeclSyntax(ckRecordTypeOfFunc)
+        ]
+    }
+    
+    static let callWillFinishDecoding = DeclSyntax(
+            """
+            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
+                try delegate.willFinishDecoding(ckRecord: ckRecord)
+            }
+            """
+    )
+    
+    static let callWillFinishEncoding = DeclSyntax(
+            """
+            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
+                try delegate.willFinishEncoding(ckRecord: record)
+            }
+            """
+    )
+    
+    static func makeRecordProperties(recordNameProperty: (name: String, type: String), getOnly: Bool) throws -> [DeclSyntax] {
+        let synthesizedRecordNameProperty =
+            try VariableDeclSyntax("var __recordName: String") {
+                try AccessorDeclSyntax("get") {
+                    "self.\(raw: recordNameProperty.name)"
+                }
+                if !getOnly {
+                    try AccessorDeclSyntax("set") {
+                        "self.\(raw: recordNameProperty.name) = newValue"
+                    }
+                }
+            }
+        
+        let synthesizedRecordIDProperty =
+            try VariableDeclSyntax("var __recordID: CKRecord.ID") {
+                try AccessorDeclSyntax("get") {
+                    "return CKRecord.ID(recordName: self.__recordName)"
+                }
+                if !getOnly {
+                    try AccessorDeclSyntax("set") {
+                        "self.__recordName = newValue.recordName"
+                    }
+                }
+            }
+        
+        let synthesizedRecordTypeProperty = try VariableDeclSyntax(
+            "static let __recordType: String = \(raw: recordNameProperty.type)"
+        )
+        
+        return [
+            DeclSyntax(synthesizedRecordNameProperty),
+            DeclSyntax(synthesizedRecordIDProperty),
+            DeclSyntax(synthesizedRecordTypeProperty)
+        ]
+    }
+    
+    static func makeEncodingErrorEnum(className: String) throws -> DeclSyntax {
+        let localizedDescriptionEncoding = try VariableDeclSyntax("var localizedDescription: String") {
+            #"""
+            switch self {
+            case .emptyRecordName(let fieldName):
+                return "Error when trying to encode instance of \#(raw: className) to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
+            }
+            """#
+        }
+        
+        let encodingError = try EnumDeclSyntax("enum CKRecordEncodingError: Error") {
+            "case emptyRecordName(fieldName: String)"
+            localizedDescriptionEncoding
+        }
+        
+        return DeclSyntax(encodingError)
+    }
+    
+    static func makeDecodingErrorEnum(className: String) throws -> DeclSyntax {
         let localizedDescriptionProperty = try VariableDeclSyntax("var localizedDescription: String") {
             #"""
-            let genericMessage = "Error while trying to initialize an instance of \#(raw: className ?? "") from a CKRecord:"
+            let genericMessage = "Error while trying to initialize an instance of \#(raw: className) from a CKRecord:"
             let specificReason: String
             switch self {
             case let .missingField(fieldName):
@@ -125,124 +288,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             localizedDescriptionProperty
         }
         
-        let localizedDescriptionEncoding = try VariableDeclSyntax("var localizedDescription: String") {
-            #"""
-            var localizedDescription: String {
-                switch self {
-                case .emptyRecordName(let fieldName):
-                    return "Error when trying to encode instance of \#(raw: className ?? "") to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
-                }
-            }            
-            """#
-        }
-        
-        let encodingError = try EnumDeclSyntax("enum CKRecordEncodingError: Error") {
-            "case emptyRecordName(fieldName: String)"
-            localizedDescriptionEncoding
-        }
-        
-        let unwrappedTypeFunc = try FunctionDeclSyntax(
-            """
-            func unwrappedType<T>(of value: T) -> Any.Type {
-                if let ckRecordValue = value as? CKRecordValue {
-                    ckRecordTypeOf(of: ckRecordValue)
-                } else {
-                    Swift.type(of: value as Any)
-                }
-            }
-            """
-        )
-        
-        let ckRecordTypeOfFunc = try FunctionDeclSyntax(
-            """
-            func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
-                Swift.type(of: v as Any)
-            }
-            """
-        )
-        let callWillFinishDecoding = DeclSyntax(
-            """
-            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
-                try delegate.willFinishDecoding(ckRecord: ckRecord)
-            }
-            """
-        )
-        let callWillFinishEncoding = DeclSyntax(
-            """
-            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
-                try delegate.willFinishEncoding(ckRecord: record)
-            }
-            """
-        )
-        let recordNameGetAccessor = try AccessorDeclSyntax("get") {
-            "self.\(raw: recordNameProperty)"
-        }
-        let recordNameSetAccessor = try AccessorDeclSyntax("set") {
-            "self.\(raw: recordNameProperty) = newValue"
-        }
-        
-        let recordNameSynthesizedProperty = try VariableDeclSyntax("var __recordName: String") {
-            recordNameGetAccessor
-            if !recordNameGetOnly {
-                recordNameSetAccessor
-            }
-        }
-        let recordIDGetAccessor = try AccessorDeclSyntax("set") {
-            "self.__recordName = newValue.recordName"
-        }
-        let recordIDSetAccessor = try AccessorDeclSyntax("get") {
-            "return CKRecord.ID(recordName: self.__recordName)"
-        }
-        let recordIDSynthesizedProperty = try VariableDeclSyntax("var __recordID: CKRecord.ID") {
-            recordIDGetAccessor
-            if !recordNameGetOnly {
-                recordIDSetAccessor
-            }
-        }
-        let recordTypeSynthesizedProperty = try VariableDeclSyntax(
-            "static let __recordType: String = \(raw: recordTypeName)"
-        )
-        return [
-            """
-            
-            required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws {
-                \(unwrappedTypeFunc)
-                \(ckRecordTypeOfFunc)
-                
-                self.\(raw: recordNameProperty) = ckRecord.recordID.recordName
-                
-                \(decodingCodeBlock)
-                
-                \(callWillFinishDecoding)
-            }
-            """,
-            """
-            func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) throws -> (CKRecord, [CKRecord]) {
-                var relationshipRecords: [CKRecord] = []
-                relationshipRecords = []
-                guard self.__recordName.isEmpty == false else {
-                    throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNameProperty))
-                }
-                var record: CKRecord
-                if let baseRecord {
-                    record = baseRecord
-                } else {
-                    record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
-                }
-                
-                \(encodingCodeBlock)
-                
-                \(callWillFinishEncoding)
-                
-                return (record, relationshipRecords)
-            }
-            """,
-            DeclSyntax(recordTypeSynthesizedProperty),
-            DeclSyntax(recordIDSynthesizedProperty),
-            DeclSyntax(recordNameSynthesizedProperty),
-            DeclSyntax(encodingError),
-            DeclSyntax(decodingError),
-        ]
+        return DeclSyntax(decodingError)
     }
     
     static func makeDecodingDeclarations(forDeclarations declarations: [DeclarationInfo], mainName: String) -> DeclSyntax {

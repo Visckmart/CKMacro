@@ -4,8 +4,9 @@ import CloudKit
 @ConvertibleToCKRecord
 class User {
     
+    @CKRecordName var a: String = "a"
 //    @CKReference(action: .deleteSelf) var sub: User? = nil
-    @CKReference(action: .deleteSelf) var extra: Extra
+    @CKReference(.referencesProperty) var extra: Extra
     var dataList: [Data] = [Data()]
     var photo: Data = "testando".data(using: .utf8)!
     var otherPhoto: Data = Data()
@@ -29,6 +30,7 @@ class User {
 
 @ConvertibleToCKRecord
 class Extra {
+    @CKRecordName var a: String = "a"
     var info: Int = 10
     init(info: Int = 10) {
         self.info = info
