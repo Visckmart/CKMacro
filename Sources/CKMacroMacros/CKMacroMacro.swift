@@ -5,36 +5,8 @@ import SwiftSyntaxMacros
 import SwiftDiagnostics
 
 import CloudKit
-enum CustomError: Error, CustomStringConvertible {
-    case message(String)
-    
-    var description: String {
-        switch self {
-        case .message(let text):
-            return text
-        }
-    }
-}
 
-/// A parser error with a static message.
-public struct StaticParserError: Error, DiagnosticMessage {
-    public let message: String
-    private let messageID: String
-    
-    /// This should only be called within a static var on DiagnosticMessage, such
-    /// as the examples below. This allows us to pick up the messageID from the
-    /// var name.
-    fileprivate init(_ message: String, messageID: String = #function) {
-        self.message = message
-        self.messageID = messageID
-    }
-    
-    public var diagnosticID: MessageID {
-        MessageID(domain: "ckmacro", id: "\(type(of: self)).\(messageID)")
-    }
-    
-    public var severity: DiagnosticSeverity { .error }
-}
+
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
 //    enum MacroError {
@@ -57,111 +29,168 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
+        guard let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text else {
+            throw DiagnosticsError(diagnostics: [
+                Diagnostic(node: node, message: MacroError.simple("Macro has to be used in a class"))
+            ])
+        }
+        let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
+        let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
         
         var declarationInfo = [DeclarationInfo]()
         var declarationInfoD = [DeclarationInfo]()
         for member in declaration.memberBlock.members {
             if let member = member.decl.as(VariableDeclSyntax.self) {
-//                return [">\(raw: member.bindingSpecifier.trimmed.text)"]
                 for binding in member.bindings {
-                    let hasAccessor = binding.accessorBlock != nil
-//                    let m = member.modifiers.com
-//                    let hasInitializer = binding.initializer != nil
-//                    let hasSetter = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.filter({$0.accessorSpecifier == .keyword(.set)}).isEmpty ?? false
                     let isStatic = member.modifiers.filter { $0.as(DeclModifierSyntax.self)?.name.trimmed.text == "static" }.isEmpty == false
                     guard isStatic == false else { continue }
-//                    if binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.trimmed.text == "empty" {
-//                        throw StaticParserError("\(isStatic) \(member.modifiers.compactMap { $0.as(DeclModifierSyntax.self)?.name.trimmed.text })")
-//                    }
                     let accessorSpecifiers = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.compactMap(\.accessorSpecifier)
 //                    let getSetAccessors: [TokenSyntax]? =
                     let isComputed = (accessorSpecifiers?.filter({$0 == .keyword(.set) || $0 == .keyword(.get)}) ?? []).isEmpty == false
                     guard isComputed == false else { continue }
-//                    return [
-//                    #"""
-//                    var b = """
-//                            \#(raw: binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.trimmed.text)
-//                            \#(raw: binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.filter({$0.accessorSpecifier == .keyword(.set)}).isEmpty)
-//                            """
-//                    """#
-//                    ]
+                    
                     if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
                         declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, member.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmedDescription, member))
                         if member.bindingSpecifier.tokenKind != .keyword(.let) || binding.initializer == nil {
-//                            let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
-                            
                             declarationInfoD.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, nil, member))
                         }
                     }
                 }
             }
         }
-//        throw StaticParserError("\(declarationInfo.map(\.0.identifier.trimmed.text))")
-        let recordNameProperties = declarationInfo.filter { $0.2 == "@CKRecordName" }
-        guard recordNameProperties.count <= 1 else {
-            throw CustomError.message("There can only be one property marked with @CKRecordName")
-//            context.diagnose(Diagnostic(node: node, message: StaticParserError("Missing @CKRecordName")))
-//            fatalError()
+        
+        func getRecordName() throws -> DeclarationInfo {
+            let recordNameProperties = declarationInfo.filter { $0.2 == "@CKRecordName" }
+            guard recordNameProperties.count <= 1 else {
+                let diagnostics = recordNameProperties.map {
+                    Diagnostic(
+                        node: $0.4!,
+                        message: MacroError.simple("Multiple properties marked with @CKRecordName")
+                    )
+                }
+                throw DiagnosticsError(diagnostics: diagnostics)
+            }
+            
+            guard let recordNamePropertyFull = recordNameProperties.first else {
+                throw DiagnosticsError(diagnostics: [
+                    Diagnostic(
+                        node: declaration.introducer,
+                        message: MacroError.simple("Missing property marked with @CKRecordName")
+//                        message: MacroError.simple("At least one property needs to be marked with @CKRecordName")
+                    )
+                ])
+            }
+            return recordNamePropertyFull
         }
         
-        guard let recordNamePropertyFull = recordNameProperties.first else {
-//            fatalError()
-            throw CustomError.message("At least one property needs to be marked with @CKRecordName")
-        }
+        let recordNamePropertyFull = try getRecordName()
         let recordNameProperty = recordNamePropertyFull.0.identifier.trimmed.text
         let recordNameType = recordNamePropertyFull.1!.type.trimmedDescription
+        let recordNameGetOnly = recordNamePropertyFull.4?.bindingSpecifier.text == "let"
         let recordNameIsOptional = recordNameType.hasSuffix("?") || recordNameType.hasPrefix("Optional<")
-//        guard recordNameType == "String?" || recordNameType == "Optional<String>" else {
-//            throw CustomError.message("The property marked with @CKRecordName should have type Optional<Int>; '\(recordNameProperty)' is a \(type)")
-////            throw CustomError.message("The property '\(recordNameProperty)' was marked with @CKRecordName but is not of type Optional<String>")
-//        }
-        guard recordNameIsOptional == false else {
-            throw CustomError.message("ID can't be an optional")
+        guard recordNameType == "String" else {
+            let diagnostic = Diagnostic(
+                node: recordNamePropertyFull.4!.attributes.first!,
+                //                node: recordNamePropertyFull.1!.type,
+                message: MacroError.simple("Cannot set property of type '\(recordNameType)' as record name; the record name has to be a 'String'")
+                //                message: MacroError.simple("Property marked with @CKRecordName can't be an optional")
+            )
+            throw DiagnosticsError(diagnostics: [diagnostic])
         }
-        let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
-        let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text
-        let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
+//        guard recordNameIsOptional == false else {
+//            let diagnostic = Diagnostic(
+//                node: recordNamePropertyFull.4!.attributes.first!,
+////                node: recordNamePropertyFull.1!.type,
+//                message: MacroError.simple("Cannot set property of type \(recordNameType) as record name")
+////                message: MacroError.simple("Property marked with @CKRecordName can't be an optional")
+//            )
+//            throw DiagnosticsError(diagnostics: [diagnostic])
+//        }
+//        guard recordNameType == "String" else {
+//            let diagnostic = Diagnostic(
+//                node: recordNamePropertyFull.1!.type,
+//                message: MacroError.simple("Property marked with @CKRecordName has to be a String")
+//            )
+//            throw DiagnosticsError(diagnostics: [diagnostic])
+//        }
+        
         declarationInfo = declarationInfo.filter { $0.2 != "@CKRecordName" }
         declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
         let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: declarationInfo, mainName: recordTypeName)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD, mainName: recordTypeName)
-//        let curr = className?.hasSuffix("m") ?? false
-        let recordNameGetOnly = recordNamePropertyFull.4?.bindingSpecifier.text == "let"
-//        if curr {
-//            throw StaticParserError("\(recordNamePropertyFull.4?.bindingSpecifier.text)")
-//        }
-//        context.diagnose(StaticPar)
+        let unwrappedTypeFunc = try FunctionDeclSyntax(
+            """
+            func unwrappedType<T>(of value: T) -> Any.Type {
+                if let ckRecordValue = value as? CKRecordValue {
+                    ckRecordTypeOf(of: ckRecordValue)
+                } else {
+                    Swift.type(of: value as Any)
+                }
+            }
+            """
+        )
         
+        let ckRecordTypeOfFunc = try FunctionDeclSyntax(
+            """
+            func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
+                Swift.type(of: v as Any)
+            }
+            """
+        )
+        let callWillFinishDecoding = DeclSyntax(
+            """
+            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
+                try delegate.willFinishDecoding(ckRecord: ckRecord)
+            }
+            """
+        )
+        let callWillFinishEncoding = DeclSyntax(
+            """
+            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
+                try delegate.willFinishEncoding(ckRecord: record)
+            }
+            """
+        )
+        let recordNameGetAccessor = try AccessorDeclSyntax("get") {
+            "self.\(raw: recordNameProperty)"
+        }
+        let recordNameSetAccessor = try AccessorDeclSyntax("set") {
+            "self.\(raw: recordNameProperty) = newValue"
+        }
+        
+        let recordNameSynthesizedProperty = try VariableDeclSyntax("var __recordName: String") {
+            recordNameGetAccessor
+            if !recordNameGetOnly {
+                recordNameSetAccessor
+            }
+        }
+        let recordIDGetAccessor = try AccessorDeclSyntax("set") {
+            "self.__recordName = newValue.recordName"
+        }
+        let recordIDSetAccessor = try AccessorDeclSyntax("get") {
+            "return CKRecord.ID(recordName: self.__recordName)"
+        }
+        let recordIDSynthesizedProperty = try VariableDeclSyntax("var __recordID: CKRecord.ID") {
+            recordIDGetAccessor
+            if !recordNameGetOnly {
+                recordIDSetAccessor
+            }
+        }
+        let recordTypeSynthesizedProperty = try VariableDeclSyntax(
+            "static let __recordType: String = \(raw: recordTypeName)"
+        )
         return [
-//            #"""
-//            //func type<T: CKRecordValue>(of v: T?) -> (any Any.Type)? { v.flatMap { type(of: $0 as Any) } }
-//            //var x = """
-//            //(raw: declaration.attributes.map(\.description))
-//            \#(raw: declarationInfo.map { ($0.2, $0.0.identifier.trimmed.text) }.map {"//\($0)"}.joined(separator: "\n"))
-//            //"""
-//            """#,
             """
             
             required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws {
-                func unwrappedType<T>(of value: T) -> Any.Type {
-                    if let ckRecordValue = value as? CKRecordValue {
-                        ckRecordTypeOf(of: ckRecordValue)
-                    } else {
-                        Swift.type(of: value as Any)
-                    }
-                }
-                func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
-                    Swift.type(of: v as Any)
-                }
+                \(unwrappedTypeFunc)
+                \(ckRecordTypeOfFunc)
                 
-                //self.__recordID = CKRecord.CodableID(ckRecord.recordID)
                 self.\(raw: recordNameProperty) = ckRecord.recordID.recordName
                 
                 \(decodingCodeBlock)
-                //self.email = ckRecord.recordID.recordName
-                if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
-                    try delegate.willFinishDecoding(ckRecord: ckRecord)
-                }
+                
+                \(callWillFinishDecoding)
             }
             """,
             """
@@ -180,50 +209,19 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 \(encodingCodeBlock)
                 
-                if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
-                    try delegate.willFinishEncoding(ckRecord: record)
-                }
+                \(callWillFinishEncoding)
                 
                 return (record, relationshipRecords)
             }
             """,
-            
-            recordNameGetOnly ?
-            """
-            static let __recordType: String = \(raw: recordTypeName)
-            var __recordID: CKRecord.ID {
-                get {
-                    return CKRecord.ID(recordName: self.__recordName)
-                }
-            }
-            var __recordName: String
-            {
-                get {
-                    self.\(raw: recordNameProperty)
-                }
-            }
-            """
-            :
-                """
-            static let __recordType: String = \(raw: recordTypeName)
-            var __recordID: CKRecord.ID {
-                get {
-                    return CKRecord.ID(recordName: self.__recordName)
-                }
-                set {
-                    self.__recordName = newValue.recordName
-                }
-            }
-            var __recordName: String
-            {
-                get {
-                    self.\(raw: recordNameProperty)
-                }
-                set {
-                    self.\(raw: recordNameProperty) = newValue
-                }
-            }
-            """,
+            DeclSyntax(recordTypeSynthesizedProperty),
+            DeclSyntax(recordIDSynthesizedProperty),
+            DeclSyntax(recordNameSynthesizedProperty),
+//            """
+//            \(recordTypeSynthesizedProperty)
+//            \(recordIDSynthesizedProperty)
+//            \(recordNameSynthesizedProperty)
+//            """,
             #"""
             enum CKRecordEncodingError: Error {
                 case emptyRecordName(fieldName: String)
