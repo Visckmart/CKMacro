@@ -9,9 +9,6 @@ import CloudKit
 
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
-//    enum MacroError {
-//        case noRecordNameSpecified
-//    }
     typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String, String?, VariableDeclSyntax?)
     
     static let specialFields: [String: String] = [
@@ -76,7 +73,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     Diagnostic(
                         node: declaration.introducer,
                         message: MacroError.simple("Missing property marked with @CKRecordName")
-//                        message: MacroError.simple("At least one property needs to be marked with @CKRecordName")
                     )
                 ])
             }
@@ -93,31 +89,58 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 node: recordNamePropertyFull.4!.attributes.first!,
                 //                node: recordNamePropertyFull.1!.type,
                 message: MacroError.simple("Cannot set property of type '\(recordNameType)' as record name; the record name has to be a 'String'")
-                //                message: MacroError.simple("Property marked with @CKRecordName can't be an optional")
             )
             throw DiagnosticsError(diagnostics: [diagnostic])
         }
-//        guard recordNameIsOptional == false else {
-//            let diagnostic = Diagnostic(
-//                node: recordNamePropertyFull.4!.attributes.first!,
-////                node: recordNamePropertyFull.1!.type,
-//                message: MacroError.simple("Cannot set property of type \(recordNameType) as record name")
-////                message: MacroError.simple("Property marked with @CKRecordName can't be an optional")
-//            )
-//            throw DiagnosticsError(diagnostics: [diagnostic])
-//        }
-//        guard recordNameType == "String" else {
-//            let diagnostic = Diagnostic(
-//                node: recordNamePropertyFull.1!.type,
-//                message: MacroError.simple("Property marked with @CKRecordName has to be a String")
-//            )
-//            throw DiagnosticsError(diagnostics: [diagnostic])
-//        }
         
         declarationInfo = declarationInfo.filter { $0.2 != "@CKRecordName" }
         declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
         let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: declarationInfo, mainName: recordTypeName)
         let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD, mainName: recordTypeName)
+        let localizedDescriptionProperty = try VariableDeclSyntax("var localizedDescription: String") {
+            #"""
+            let genericMessage = "Error while trying to initialize an instance of \#(raw: className ?? "") from a CKRecord:"
+            let specificReason: String
+            switch self {
+            case let .missingField(fieldName):
+                specificReason = "missing field '\(fieldName)' on CKRecord."
+            case let .fieldTypeMismatch(fieldName, expectedType, foundType):
+                specificReason = "field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
+            case let .missingDatabase(fieldName):
+                specificReason = "missing database to fetch relationship '\(fieldName)'."
+            case let .errorDecodingNestedField(fieldName, error):
+                specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
+            }
+            return "\(genericMessage) \(specificReason)"
+            """#
+        }
+        
+        let decodingError = try EnumDeclSyntax("enum CKRecordDecodingError: Error") {
+            """
+            case missingField(String)
+            case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
+            case missingDatabase(fieldName: String)
+            case errorDecodingNestedField(fieldName: String, _ error: Error)
+            """
+            localizedDescriptionProperty
+        }
+        
+        let localizedDescriptionEncoding = try VariableDeclSyntax("var localizedDescription: String") {
+            #"""
+            var localizedDescription: String {
+                switch self {
+                case .emptyRecordName(let fieldName):
+                    return "Error when trying to encode instance of \#(raw: className ?? "") to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
+                }
+            }            
+            """#
+        }
+        
+        let encodingError = try EnumDeclSyntax("enum CKRecordEncodingError: Error") {
+            "case emptyRecordName(fieldName: String)"
+            localizedDescriptionEncoding
+        }
+        
         let unwrappedTypeFunc = try FunctionDeclSyntax(
             """
             func unwrappedType<T>(of value: T) -> Any.Type {
@@ -217,50 +240,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             DeclSyntax(recordTypeSynthesizedProperty),
             DeclSyntax(recordIDSynthesizedProperty),
             DeclSyntax(recordNameSynthesizedProperty),
-//            """
-//            \(recordTypeSynthesizedProperty)
-//            \(recordIDSynthesizedProperty)
-//            \(recordNameSynthesizedProperty)
-//            """,
-            #"""
-            enum CKRecordEncodingError: Error {
-                case emptyRecordName(fieldName: String)
-            
-                var localizedDescription: String {
-                    switch self {
-                    case .emptyRecordName(let fieldName):
-                        return "Error when trying to encode instance of \#(raw: className ?? "") to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
-                        //return "Unable to instantiate CKRecord: property '\(fieldName)' is used as the recordName, so it can't be empty."
-                        //return "Unable to instantiate CKRecord: recordName is set to property '\(fieldName)', so it can't be empty."
-                    }
-                }
-            }
-            """#,
-            #"""
-            enum CKRecordDecodingError: Error {
-                
-                case missingField(String)
-                case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
-                case missingDatabase(fieldName: String)
-                case errorDecodingNestedField(fieldName: String, _ error: Error)
-            
-                var localizedDescription: String {
-                    let genericMessage = "Error while trying to initialize an instance of \#(raw: className ?? "") from a CKRecord:"
-                    let specificReason: String
-                    switch self {
-                        case let .missingField(fieldName):
-                            specificReason = "missing field '\(fieldName)' on CKRecord."
-                        case let .fieldTypeMismatch(fieldName, expectedType, foundType):
-                            specificReason = "field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
-                        case let .missingDatabase(fieldName):
-                            specificReason = "missing database to fetch relationship '\(fieldName)'."
-                        case let .errorDecodingNestedField(fieldName, error):
-                            specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
-                    }
-                    return "\(genericMessage) \(specificReason)" 
-                }
-            }
-            """#,
+            DeclSyntax(encodingError),
+            DeclSyntax(decodingError),
         ]
     }
     
