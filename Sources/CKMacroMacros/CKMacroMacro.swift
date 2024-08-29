@@ -9,7 +9,96 @@ import CloudKit
 
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
-    typealias DeclarationInfo = (IdentifierPatternSyntax, TypeAnnotationSyntax?, String, String?, VariableDeclSyntax?)
+    typealias DeclarationInfo = (
+        identifier: IdentifierPatternSyntax,
+        type: TypeAnnotationSyntax?,
+        marker: String,
+        referenceFirstArgument: String?,
+        variableDeclaration: VariableDeclSyntax?
+    )
+    
+    struct PropertyDeclaration {
+        
+        var parentVariableDeclaration: VariableDeclSyntax
+        var bindingDeclaration: PatternBindingSyntax
+        
+        var identifierSyntax: TokenSyntax
+        var typeAnnotationSyntax: TypeAnnotationSyntax
+        var identifier: String
+        var type: String
+        //        var markers: [(PropertyMarker, AttributeSyntax)] = []
+        var recordNameMarker: AttributeSyntax?
+        var relationshipMarker: (node: AttributeSyntax, referenceType: String)?
+        var bindingSpecifier: TokenSyntax
+        var isConstant: Bool
+        var isAlreadyInitialized: Bool
+        init?(parentVariableDeclaration: VariableDeclSyntax, bindingDeclaration: PatternBindingSyntax) throws {
+            self.parentVariableDeclaration = parentVariableDeclaration
+            self.bindingDeclaration = bindingDeclaration
+//            try error("testing", node: parentVariableDeclaration)
+            func isModifierStatic(_ modifier: DeclModifierListSyntax.Element) -> Bool {
+                guard let modifier = modifier.as(DeclModifierSyntax.self) else { return false }
+                return modifier.name.trimmed.text == "static"
+            }
+            let isStatic = parentVariableDeclaration.modifiers.contains(where: isModifierStatic)
+            guard isStatic == false else { return nil }
+            
+            if let accessors = bindingDeclaration.accessorBlock?.accessors.as(AccessorDeclListSyntax.self) {
+                func hasGetOrSetSpecifier(_ token: AccessorDeclListSyntax.Element) -> Bool {
+                       token.accessorSpecifier == .keyword(.get)
+                    || token.accessorSpecifier == .keyword(.set)
+                }
+                let isComputed = accessors.contains(where: hasGetOrSetSpecifier)
+                guard isComputed == false else { return nil }
+            }
+            
+            guard
+                let identifierSyntax = bindingDeclaration.pattern.as(IdentifierPatternSyntax.self)?.identifier,
+                let identifier = identifierSyntax.identifier
+            else {
+                return nil
+            }
+            self.identifierSyntax = identifierSyntax
+            self.identifier = identifier.name
+            
+            guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
+                return nil
+            }
+            self.typeAnnotationSyntax = typeAnnotationSyntax
+            self.type = typeAnnotationSyntax.type.trimmed.description
+            
+//            let x: AttributedTypeSyntax
+//            try warning(parentVariableDeclaration.attributes.compactMap { "\(String(reflecting: $0.as(AttributeSyntax.self)! == "CKRecordName"))" }.joined(), node: parentVariableDeclaration)
+            
+//            try error("\(parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self)?.attributeName.as(IdentifierTypeSyntax.self)?.name.text })", node: parentVariableDeclaration)
+            for attribute in parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self) } {
+                if let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text {
+                    if identifier == "CKRecordName" {
+                        recordNameMarker = attribute
+                        //                    markers.append((.recordName, attribute))
+                    } else if identifier == "CKReference" {
+                        guard
+                            let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
+                            let firstArgument = arguments.first,
+                            let declarationName = firstArgument.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
+                        else {
+                            return nil
+                        }
+                        relationshipMarker = (attribute, declarationName)
+                        //                    markers.append((.relationship, attribute))
+                    }
+                } else {
+                    return nil
+                }
+            }
+            
+            self.bindingSpecifier = parentVariableDeclaration.bindingSpecifier
+            self.isConstant = bindingSpecifier == .keyword(.let)
+            self.isAlreadyInitialized = isConstant && bindingDeclaration.initializer != nil
+        }
+        
+        
+    }
     
     static let specialFields: [String: String] = [
         "creationDate": "Date?",
@@ -19,6 +108,16 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         "recordID": "CKRecord.ID",
         "recordChangeTag": "String?"
     ]
+    
+    static func error(_ s: String, node: SyntaxProtocol) throws {
+        throw DiagnosticsError(diagnostics: [
+            Diagnostic(node: node, message: MacroError.simple(s))
+        ])
+    }
+    
+    static func warning(_ s: String, node: SyntaxProtocol, context: MacroExpansionContext) throws {
+        context.addDiagnostics(from: MacroError.warning(s), node: node)
+    }
     
     public static func expansion(
         of node: AttributeSyntax,
@@ -33,35 +132,62 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         }
         let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
         let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
+        var propertyDeclarations = [PropertyDeclaration]()
         
-        var declarationInfo = [DeclarationInfo]()
-        var declarationInfoD = [DeclarationInfo]()
+//        var declarationInfo = [DeclarationInfo]()
+//        var declarationInfoD = [DeclarationInfo]()
+        
         for member in declaration.memberBlock.members {
             if let member = member.decl.as(VariableDeclSyntax.self) {
                 for binding in member.bindings {
-                    let isStatic = member.modifiers.filter { $0.as(DeclModifierSyntax.self)?.name.trimmed.text == "static" }.isEmpty == false
-                    guard isStatic == false else { continue }
-                    let accessorSpecifiers = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.compactMap(\.accessorSpecifier)
-//                    let getSetAccessors: [TokenSyntax]? =
-                    let isComputed = (accessorSpecifiers?.filter({$0 == .keyword(.set) || $0 == .keyword(.get)}) ?? []).isEmpty == false
-                    guard isComputed == false else { continue }
-                    
-                    if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
-                        declarationInfo.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, member.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmedDescription, member))
-                        if member.bindingSpecifier.tokenKind != .keyword(.let) || binding.initializer == nil {
-                            declarationInfoD.append((bindingPattern, binding.typeAnnotation, member.attributes.trimmedDescription, nil, member))
-                        }
+                    if let x = try PropertyDeclaration(parentVariableDeclaration: member, bindingDeclaration: binding) {
+                        propertyDeclarations.append(x)
                     }
+                    
+//                    let isStatic = member.modifiers.filter { $0.as(DeclModifierSyntax.self)?.name.trimmed.text == "static" }.isEmpty == false
+//                    guard isStatic == false else { continue }
+//                    let accessorSpecifiers = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.compactMap(\.accessorSpecifier)
+////                    let getSetAccessors: [TokenSyntax]? =
+//                    let isComputed = (accessorSpecifiers?.filter({$0 == .keyword(.set) || $0 == .keyword(.get)}) ?? []).isEmpty == false
+//                    guard isComputed == false else { continue }
+//                    
+//                    if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
+//                        declarationInfo.append(
+//                            (
+//                                bindingPattern,
+//                                binding.typeAnnotation,
+//                                member.attributes.trimmedDescription,
+//                                member.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmedDescription,
+//                                member
+//                            )
+//                        )
+//                        if member.bindingSpecifier.tokenKind != .keyword(.let) || binding.initializer == nil {
+//                            declarationInfoD.append(
+//                                (
+//                                    bindingPattern,
+//                                    binding.typeAnnotation,
+//                                    member.attributes.trimmedDescription,
+//                                    nil,
+//                                    member
+//                                )
+//                            )
+//                        }
+//                    }
                 }
             }
         }
         
-        func getRecordName() throws -> DeclarationInfo {
-            let recordNameProperties = declarationInfo.filter { $0.2 == "@CKRecordName" }
+        func getRecordName() throws -> PropertyDeclaration {
+            let recordNameProperties = propertyDeclarations.compactMap { propertyDeclaration in
+                if let markerAttribute = propertyDeclaration.recordNameMarker {
+                    return (propertyDeclaration: propertyDeclaration, markerAttribute: markerAttribute)
+                }
+                return nil
+            }
             guard recordNameProperties.count <= 1 else {
                 let diagnostics = recordNameProperties.map {
                     Diagnostic(
-                        node: $0.4!,
+                        node: $0.markerAttribute,
                         message: MacroError.simple("Multiple properties marked with @CKRecordName")
                     )
                 }
@@ -72,38 +198,45 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 throw DiagnosticsError(diagnostics: [
                     Diagnostic(
                         node: declaration.introducer,
-                        message: MacroError.simple("Missing property marked with @CKRecordName")
+                        message: MacroError.simple("Missing property marked with @CKRecordName \(recordNameProperties.map(\.1))")
                     )
                 ])
             }
-            return recordNamePropertyFull
+            return recordNamePropertyFull.0
         }
         
         let recordNamePropertyFull = try getRecordName()
-        let recordNameProperty = recordNamePropertyFull.0.identifier.trimmed.text
-        let recordNameType = recordNamePropertyFull.1!.type.trimmedDescription
-        let recordNameGetOnly = recordNamePropertyFull.4?.bindingSpecifier.text == "let"
-        let recordNameIsOptional = recordNameType.hasSuffix("?") || recordNameType.hasPrefix("Optional<")
-        guard recordNameType == "String" else {
+//        let recordNameProperty = recordNamePropertyFull.0.identifier.trimmed.text
+//        let recordNameType = recordNamePropertyFull.1!.type.trimmedDescription
+//        let recordNameGetOnly = recordNamePropertyFull.4?.bindingSpecifier.text == "let"
+        let recordNameIsOptional = recordNamePropertyFull.type.hasSuffix("?") || recordNamePropertyFull.type.hasPrefix("Optional<")
+        guard recordNamePropertyFull.type == "String" else {
             let diagnostic = Diagnostic(
-                node: recordNamePropertyFull.4!.attributes.first!,
+                node: recordNamePropertyFull.typeAnnotationSyntax,
                 //                node: recordNamePropertyFull.1!.type,
-                message: MacroError.simple("Cannot set property of type '\(recordNameType)' as record name; the record name has to be a 'String'")
+                message: MacroError.simple("Cannot set property of type '\(recordNamePropertyFull.type)' as record name; the record name has to be a 'String'")
             )
             throw DiagnosticsError(diagnostics: [diagnostic])
         }
         
-        declarationInfo = declarationInfo.filter { $0.2 != "@CKRecordName" }
-        declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
-        let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: declarationInfo, mainName: recordTypeName)
-        let decodingCodeBlock = makeDecodingDeclarations(forDeclarations: declarationInfoD, mainName: recordTypeName)
+//        let diagnostic = Diagnostic(
+//            node: node,
+//            message: MacroError.simple("\(propertyDeclarations)")
+//        )
+//        throw DiagnosticsError(diagnostics: [diagnostic])
+//        declarationInfo = declarationInfo.filter { $0.2 != "@CKRecordName" }
+//        declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
+        propertyDeclarations = propertyDeclarations.filter { $0.recordNameMarker == nil }
+        let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
+        let decodingCodeBlock = try makeDecodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
+        
         
         let initFromCKRecord = try InitializerDeclSyntax(
             "required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws"
         ) {
-            try makeTypeUnwrappingFunc()
+            try Self.makeTypeUnwrappingFunc()
             
-            "self.\(raw: recordNameProperty) = ckRecord.recordID.recordName"
+            "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName"
             
             decodingCodeBlock
             
@@ -113,7 +246,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         let convertToCKRecordSetup = try CodeBlockSyntax(
             """
             guard self.__recordName.isEmpty == false else {
-                throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNameProperty))
+                throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNamePropertyFull.identifier))
             }
             var record: CKRecord
             if let baseRecord {
@@ -134,15 +267,17 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             
             \(encodingCodeBlock)
             
-            \(callWillFinishEncoding)
+            \(Self.callWillFinishEncoding)
             
             return (record, relationshipRecords)
             """
         }
         
-        let recordProperties = try makeRecordProperties(
-            recordNameProperty: (name: recordNameProperty, type: recordTypeName),
-            getOnly: recordNameGetOnly
+        
+        let recordProperties = try Self.makeRecordProperties(
+            recordNameProperty: (name: recordNamePropertyFull.identifier, type: recordNamePropertyFull.type),
+            recordType: recordTypeName,
+            getOnly: recordNamePropertyFull.isConstant
         )
         
         let encodingAndDecodingDeclarations = [
@@ -150,7 +285,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             DeclSyntax(methodConvertToCKRecord),
         ]
         
-        let errorEnums = try makeErrorEnums(className: className ?? "")
+        let errorEnums = try Self.makeErrorEnums(className: className ?? "")
         
         return recordProperties + encodingAndDecodingDeclarations + errorEnums
         
@@ -205,7 +340,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             """
     )
     
-    static func makeRecordProperties(recordNameProperty: (name: String, type: String), getOnly: Bool) throws -> [DeclSyntax] {
+    static func makeRecordProperties(recordNameProperty: (name: String, type: String), recordType: String, getOnly: Bool) throws -> [DeclSyntax] {
         let synthesizedRecordNameProperty =
             try VariableDeclSyntax("var __recordName: String") {
                 try AccessorDeclSyntax("get") {
@@ -231,7 +366,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
         
         let synthesizedRecordTypeProperty = try VariableDeclSyntax(
-            "static let __recordType: String = \(raw: recordNameProperty.type)"
+            "static let __recordType: String = \(raw: recordType)"
         )
         
         return [
@@ -291,11 +426,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         return DeclSyntax(decodingError)
     }
     
-    static func makeDecodingDeclarations(forDeclarations declarations: [DeclarationInfo], mainName: String) -> DeclSyntax {
+    static func makeDecodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> DeclSyntax {
         var declsDec: [String] = []
         for declaration in declarations {
-            let name = declaration.0.identifier.trimmed.text
-            let type = declaration.1!.type.trimmedDescription
+            let name = declaration.identifier
+            let type = declaration.type
             let dec: String
             
             
@@ -339,40 +474,96 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 self.\#(name) = \#(name)AssetContents
                 
                 """#
-            } else if declaration.2.hasPrefix("@CKReference") {
+            } else if let referenceMarker = declaration.relationshipMarker {
                 
                 var filteredType = type
-                if filteredType.hasSuffix("?") { filteredType = String(filteredType.dropLast()) }
-                if filteredType.hasPrefix("Optional<") { filteredType = String(filteredType.dropFirst(9).dropLast()) }
+                if filteredType.hasSuffix("?") {
+                    filteredType = String(filteredType.dropLast())
+                }
+                if filteredType.hasPrefix("Optional<") {
+                    filteredType = String(filteredType.dropFirst(9).dropLast())
+                }
+                
                 let isOptional = filteredType != type
-                dec =
-//                       #"""
-//                       /// Relationship `\#(name)`
-//                       guard let \#(name)Reference = ckRecord["\#(name)"] as? CKRecord.Reference\#(isOptional ? "?" : "") else {  
-//                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "CKRecord.Reference\#(isOptional ? "?" : "")", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
-//                       }
-//                       
-//                       """#
-//                +
-                (
-                    isOptional
-                    ? #"""
-                    let \#(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
-                    let \#(name)Query = CKQuery(recordType: \#(filteredType).__recordType, predicate: NSPredicate(format: "\#(mainName.dropFirst().dropLast())Owner == %@", \#(name)OwnerReference))
-                    do {
-                        let \#(name)FetchResponse = try await database?.records(matching: \#(name)Query)
-                        guard let \#(name)FetchedRecords = \#(name)FetchResponse?.0.compactMap({try? $0.1.get()}) else {
-                            throw CKRecordDecodingError.missingField("erro curriculum")
+//                let referenceType = declaration.4?.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
+                let referenceType = referenceMarker.referenceType
+                var action = ""
+                if referenceType == "referencesProperty" {
+                    action = ".none"
+                } else if referenceType == "isReferencedByProperty" {
+                    action = ".deleteSelf"
+                } else if referenceType == "data" {
+                    action = "data"
+                } else {
+                    throw DiagnosticsError(diagnostics: [Diagnostic(node: referenceMarker.node, message: MacroError.simple("Unknown reference mode"))])
+                }
+                if referenceType == "referencesProperty" {
+                    let isOptional = filteredType != type
+                    dec = #"""
+                       /// Relationship `\#(name)`
+                       guard let \#(name)Reference = ckRecord["\#(name)"] as? CKRecord.Reference\#(isOptional ? "?" : "") else {  
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "CKRecord.Reference\#(isOptional ? "?" : "")", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                       }
+                       
+                       """#
+                    +
+                    (
+                        isOptional
+                        ? #"""
+                    if let \#(name)Reference {
+                        guard let database else {
+                           throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                         }
-                        if let record = \#(name)FetchedRecords.first {
-                            \#(name) = try await \#(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: database)
+                        var \#(name)Record: CKRecord?
+                        do {
+                            \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
+                        } catch CKError.unknownItem {
+                            \#(name)Record = nil
                         }
-                    } catch CKError.invalidArguments {
-                        print("invalid arguments")
-                        \#(name) = nil
+                        if let \#(name)Record {
+                            do {
+                                let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: database)
+                                self.\#(name) = \#(name)
+                            } catch {
+                                throw CKRecordDecodingError.errorDecodingNestedField(fieldName: "\#(name)", error)
+                            }
+                        } else {
+                            self.\#(name) = nil
+                        }
                     }
                       
                     """#
+                        : #"""
+                    guard let database else {
+                        throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
+                    }
+                    let \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
+                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: database)
+                    self.\#(name) = \#(name)
+                    
+                    """#
+                    )
+                } else if referenceType == "isReferencedByProperty" {
+                    dec =
+                    isOptional
+                    ? """
+                    // \(referenceType)
+                    let \(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
+                    let \(name)Query = CKQuery(recordType: \(filteredType).__recordType, predicate: NSPredicate(format: "\(mainName.dropFirst().dropLast())Owner == %@", \(name)OwnerReference))
+                    do {
+                        let \(name)FetchResponse = try await database?.records(matching: \(name)Query)
+                        guard let \(name)FetchedRecords = \(name)FetchResponse?.0.compactMap({try? $0.1.get()}) else {
+                            throw CKRecordDecodingError.missingField("erro curriculum")
+                        }
+                        if let record = \(name)FetchedRecords.first {
+                            \(name) = try await \(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: database)
+                        }
+                    } catch CKError.invalidArguments {
+                        print("invalid arguments")
+                        \(name) = nil
+                    }
+                      
+                    """
                     : #"""
                     guard let database else {
                         throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
@@ -382,7 +573,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     self.\#(name) = \#(name)
                     
                     """#
-                 )
+                } else {
+                    dec = #"""
+                    guard \#(name)Data = ckRecord["\#(name)"] as? Data\#(isOptional ? "?" : "") else {
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                    }
+                    self.\#(name) = try JSONDecoder().decode(\#(filteredType).self, from: \#(name)Data)
+                    """#
+                }
             } else if type.hasSuffix("?") || type.hasPrefix("Optional<") {
                 dec = #"""
                 /// Decoding `\#(name)`
@@ -412,16 +610,16 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         return "\(raw: declsDec.joined(separator: "\n"))"
     }
     
-    static func makeEncodingDeclarations(forDeclarations declarations: [DeclarationInfo], mainName: String) throws -> DeclSyntax {
+    static func makeEncodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> DeclSyntax {
         var declsEnc: [String] = []
         for declaration in declarations {
-            let name = declaration.0.identifier.trimmed.text
-            let type = declaration.1
+            let name = declaration.identifier
+            let type = declaration.type
             let enc: String
             guard specialFields.keys.contains(name) == false else {
                 continue
             }
-            if type?.type.trimmedDescription == "Data" {
+            if type == "Data" {
                 enc = #"""
                 let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
                 do {
@@ -432,7 +630,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 record["\#(name)"] = CKAsset(fileURL: \#(name)TemporaryAssetURL)
                 
                 """#
-            } else if type?.type.trimmedDescription == "[Data]" {
+            } else if type == "[Data]" {
                 enc = #"""
                 var \#(name)Assets = [CKAsset]()
                 for data in self.\#(name) {
@@ -447,14 +645,18 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 record["\#(name)"] = \#(name)Assets
                 
                 """#
-            } else if declaration.2.hasPrefix("@CKReference") {
-                let isOptional = type?.trimmedDescription.hasSuffix("?") ?? false || type?.trimmedDescription.hasPrefix("Optional<") ?? false
-                let referenceType = declaration.4?.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
+            } else if let referenceMarker = declaration.relationshipMarker {
+                let isOptional = type.hasSuffix("?") ?? false || type.hasPrefix("Optional<") ?? false
+                let referenceType = referenceMarker.referenceType
                 var action = ""
                 if referenceType == "referencesProperty" {
                     action = ".none"
                 } else if referenceType == "isReferencedByProperty" {
                     action = ".deleteSelf"
+                } else if referenceType == "data" {
+                    action = "data"
+                } else {
+                    throw DiagnosticsError(diagnostics: [Diagnostic(node: referenceMarker.node, message: MacroError.simple("Unknown reference mode"))])
                 }
                 if referenceType == "referencesProperty" {
                     if isOptional {
@@ -473,16 +675,16 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         let childRecord = try \#(name).convertToCKRecord()
                         record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(action))
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        
                         """#
                     }
-                } else {
+                } else if referenceType == "isReferencedByProperty" {
                     if isOptional {
                         enc = #"""
                         /// Relationship `\#(name)`
                         if let \#(name) {
                             let childRecord = try \#(name).convertToCKRecord()
                             childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
-                            //record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
                             relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                         }
                         
@@ -492,25 +694,20 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         /// Relationship `\#(name)`
                         let childRecord = try \#(name).convertToCKRecord()
                         childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
-                        //record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(declaration.3!))
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        
                         """#
                     }
+                } else {
+                    enc = """
+                    /// Relationship `\(name)`
+                    let encoded\(name) = try JSONEncoder().encode(\(name))
+                    record["\(name)"] = encoded\(name)
+                    
+                    """
                 }
             } else {
-//                enc = #"""
-//                if let \#(name)A = \#(name) as? CKRecordValue { 
-//                    record["\#(name)"] = \#(name)A
-//                }
-//                """#
-//                if let type {
-//                    let c = NSClassFromString(type.trimmedDescription)
-//                    if c as? CKRecordValue != nil {
-//                        throw StaticParserError("'\(name)' is not CKRecordValue")
-//                    }
-//                }
                 enc = #"record["\#(name)"] = self.\#(name)"#
-                //                enc = #"record.setValue(self.\#(name), forKey: "\#(name)")"#
             }
             declsEnc.append(enc)
         }
