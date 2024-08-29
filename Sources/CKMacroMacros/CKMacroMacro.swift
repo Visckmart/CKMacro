@@ -35,7 +35,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         init?(parentVariableDeclaration: VariableDeclSyntax, bindingDeclaration: PatternBindingSyntax) throws {
             self.parentVariableDeclaration = parentVariableDeclaration
             self.bindingDeclaration = bindingDeclaration
-//            try error("testing", node: parentVariableDeclaration)
+            
+            // Check static
             func isModifierStatic(_ modifier: DeclModifierListSyntax.Element) -> Bool {
                 guard let modifier = modifier.as(DeclModifierSyntax.self) else { return false }
                 return modifier.name.trimmed.text == "static"
@@ -43,15 +44,17 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             let isStatic = parentVariableDeclaration.modifiers.contains(where: isModifierStatic)
             guard isStatic == false else { return nil }
             
+            // Check computed
             if let accessors = bindingDeclaration.accessorBlock?.accessors.as(AccessorDeclListSyntax.self) {
                 func hasGetOrSetSpecifier(_ token: AccessorDeclListSyntax.Element) -> Bool {
-                       token.accessorSpecifier == .keyword(.get)
+                    token.accessorSpecifier == .keyword(.get)
                     || token.accessorSpecifier == .keyword(.set)
                 }
                 let isComputed = accessors.contains(where: hasGetOrSetSpecifier)
                 guard isComputed == false else { return nil }
             }
             
+            // Get identifier
             guard
                 let identifierSyntax = bindingDeclaration.pattern.as(IdentifierPatternSyntax.self)?.identifier,
                 let identifier = identifierSyntax.identifier
@@ -61,40 +64,45 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             self.identifierSyntax = identifierSyntax
             self.identifier = identifier.name
             
+            // Get type
             guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
                 return nil
             }
             self.typeAnnotationSyntax = typeAnnotationSyntax
             self.type = typeAnnotationSyntax.type.trimmed.description
             
-//            let x: AttributedTypeSyntax
-//            try warning(parentVariableDeclaration.attributes.compactMap { "\(String(reflecting: $0.as(AttributeSyntax.self)! == "CKRecordName"))" }.joined(), node: parentVariableDeclaration)
-            
-//            try error("\(parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self)?.attributeName.as(IdentifierTypeSyntax.self)?.name.text })", node: parentVariableDeclaration)
+            // Get markers
             for attribute in parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self) } {
-                if let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text {
-                    if identifier == "CKRecordName" {
-                        recordNameMarker = attribute
-                        //                    markers.append((.recordName, attribute))
-                    } else if identifier == "CKReference" {
-                        guard
-                            let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
-                            let firstArgument = arguments.first,
-                            let declarationName = firstArgument.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
-                        else {
-                            return nil
-                        }
+                guard let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text else {
+                    continue
+                }
+                if identifier == "CKRecordName" {
+                    recordNameMarker = attribute
+                } else if identifier == "CKReference" {
+                    if
+                        let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
+                        let firstArgument = arguments.first?.expression.as(MemberAccessExprSyntax.self),
+                        let declarationName = firstArgument.declName.baseName.identifier?.name
+                    {
                         relationshipMarker = (attribute, declarationName)
-                        //                    markers.append((.relationship, attribute))
+                    } else {
+                        throw error("Unable to get reference type for @CKReference", node: attribute)
                     }
-                } else {
-                    return nil
+                    
                 }
             }
+            
             
             self.bindingSpecifier = parentVariableDeclaration.bindingSpecifier
             self.isConstant = bindingSpecifier == .keyword(.let)
             self.isAlreadyInitialized = isConstant && bindingDeclaration.initializer != nil
+            
+            guard recordNameMarker == nil || relationshipMarker == nil else {
+                throw error(
+                    "A property cannot be marked with @CKRecordName and @CKReference simultaneously",
+                    node: parentVariableDeclaration
+                )
+            }
         }
         
         
@@ -109,8 +117,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         "recordChangeTag": "String?"
     ]
     
-    static func error(_ s: String, node: SyntaxProtocol) throws {
-        throw DiagnosticsError(diagnostics: [
+    static func error(_ s: String, node: SyntaxProtocol) -> Error {
+        return DiagnosticsError(diagnostics: [
             Diagnostic(node: node, message: MacroError.simple(s))
         ])
     }
@@ -138,41 +146,16 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //        var declarationInfoD = [DeclarationInfo]()
         
         for member in declaration.memberBlock.members {
-            if let member = member.decl.as(VariableDeclSyntax.self) {
-                for binding in member.bindings {
-                    if let x = try PropertyDeclaration(parentVariableDeclaration: member, bindingDeclaration: binding) {
-                        propertyDeclarations.append(x)
-                    }
-                    
-//                    let isStatic = member.modifiers.filter { $0.as(DeclModifierSyntax.self)?.name.trimmed.text == "static" }.isEmpty == false
-//                    guard isStatic == false else { continue }
-//                    let accessorSpecifiers = binding.accessorBlock?.accessors.as(AccessorDeclListSyntax.self)?.compactMap(\.accessorSpecifier)
-////                    let getSetAccessors: [TokenSyntax]? =
-//                    let isComputed = (accessorSpecifiers?.filter({$0 == .keyword(.set) || $0 == .keyword(.get)}) ?? []).isEmpty == false
-//                    guard isComputed == false else { continue }
-//                    
-//                    if let bindingPattern = binding.pattern.as(IdentifierPatternSyntax.self) {
-//                        declarationInfo.append(
-//                            (
-//                                bindingPattern,
-//                                binding.typeAnnotation,
-//                                member.attributes.trimmedDescription,
-//                                member.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmedDescription,
-//                                member
-//                            )
-//                        )
-//                        if member.bindingSpecifier.tokenKind != .keyword(.let) || binding.initializer == nil {
-//                            declarationInfoD.append(
-//                                (
-//                                    bindingPattern,
-//                                    binding.typeAnnotation,
-//                                    member.attributes.trimmedDescription,
-//                                    nil,
-//                                    member
-//                                )
-//                            )
-//                        }
-//                    }
+            guard let member = member.decl.as(VariableDeclSyntax.self) else {
+                continue
+            }
+            for binding in member.bindings {
+                let propertyDeclaration = try PropertyDeclaration(
+                    parentVariableDeclaration: member,
+                    bindingDeclaration: binding
+                )
+                if let propertyDeclaration {
+                    propertyDeclarations.append(propertyDeclaration)
                 }
             }
         }
@@ -206,9 +189,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         }
         
         let recordNamePropertyFull = try getRecordName()
-//        let recordNameProperty = recordNamePropertyFull.0.identifier.trimmed.text
-//        let recordNameType = recordNamePropertyFull.1!.type.trimmedDescription
-//        let recordNameGetOnly = recordNamePropertyFull.4?.bindingSpecifier.text == "let"
         let recordNameIsOptional = recordNamePropertyFull.type.hasSuffix("?") || recordNamePropertyFull.type.hasPrefix("Optional<")
         guard recordNamePropertyFull.type == "String" else {
             let diagnostic = Diagnostic(
@@ -219,13 +199,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             throw DiagnosticsError(diagnostics: [diagnostic])
         }
         
-//        let diagnostic = Diagnostic(
-//            node: node,
-//            message: MacroError.simple("\(propertyDeclarations)")
-//        )
-//        throw DiagnosticsError(diagnostics: [diagnostic])
-//        declarationInfo = declarationInfo.filter { $0.2 != "@CKRecordName" }
-//        declarationInfoD = declarationInfoD.filter { $0.2 != "@CKRecordName" }
         propertyDeclarations = propertyDeclarations.filter { $0.recordNameMarker == nil }
         let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
         let decodingCodeBlock = try makeDecodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
