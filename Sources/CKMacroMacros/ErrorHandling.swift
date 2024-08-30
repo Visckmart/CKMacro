@@ -41,24 +41,30 @@ public struct StaticParserError: Error, DiagnosticMessage {
 
 enum MacroError: Error, DiagnosticMessage {
     
-    case simple(String)
+    case error(String)
     case warning(String)
     
     var message: String {
         switch self {
-        case .simple(let string), .warning(let string):
+        case .error(let string), .warning(let string):
             return string
         }
     }
+    
     var diagnosticID: SwiftDiagnostics.MessageID {
         .init(domain: "macro", id: "\(self)")
     }
     
-    var severity: SwiftDiagnostics.DiagnosticSeverity { switch self {
-    case .simple(let string):
-            .error
-    case .warning(let string):
-            .warning
-    } }
-    
+    var severity: SwiftDiagnostics.DiagnosticSeverity {
+        switch self {
+        case .error(let string): .error
+        case .warning(let string): .warning
+        }
+    }
 }
+
+//extension MacroError: ExpressibleByStringLiteral {
+//    init(stringLiteral value: StringLiteralType) {
+//        self = .simple(value)
+//    }
+//}

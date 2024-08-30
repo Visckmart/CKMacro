@@ -1,21 +1,11 @@
 import SwiftCompilerPlugin
 import SwiftSyntax
-import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 import SwiftDiagnostics
 
 import CloudKit
 
-
 public struct ConvertibleToCKRecordMacro: MemberMacro {
-    
-    typealias DeclarationInfo = (
-        identifier: IdentifierPatternSyntax,
-        type: TypeAnnotationSyntax?,
-        marker: String,
-        referenceFirstArgument: String?,
-        variableDeclaration: VariableDeclSyntax?
-    )
     
     struct PropertyDeclaration {
         
@@ -23,15 +13,18 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         var bindingDeclaration: PatternBindingSyntax
         
         var identifierSyntax: TokenSyntax
-        var typeAnnotationSyntax: TypeAnnotationSyntax
         var identifier: String
+        
+        var typeAnnotationSyntax: TypeAnnotationSyntax
         var type: String
-        //        var markers: [(PropertyMarker, AttributeSyntax)] = []
+        
         var recordNameMarker: AttributeSyntax?
         var relationshipMarker: (node: AttributeSyntax, referenceType: String)?
+        
         var bindingSpecifier: TokenSyntax
         var isConstant: Bool
         var isAlreadyInitialized: Bool
+        
         init?(parentVariableDeclaration: VariableDeclSyntax, bindingDeclaration: PatternBindingSyntax) throws {
             self.parentVariableDeclaration = parentVariableDeclaration
             self.bindingDeclaration = bindingDeclaration
@@ -105,26 +98,18 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
         }
         
-        
     }
-    
-    static let specialFields: [String: String] = [
-        "creationDate": "Date?",
-        "modificationDate": "Date?",
-        "creatorUserRecordID": "CKRecord.ID?",
-        "lastModifiedUserRecordID": "CKRecord.ID?",
-        "recordID": "CKRecord.ID",
-        "recordChangeTag": "String?"
-    ]
     
     static func error(_ s: String, node: SyntaxProtocol) -> Error {
         return DiagnosticsError(diagnostics: [
-            Diagnostic(node: node, message: MacroError.simple(s))
+            Diagnostic(node: node, message: MacroError.error(s))
         ])
     }
     
-    static func warning(_ s: String, node: SyntaxProtocol, context: MacroExpansionContext) throws {
-        context.addDiagnostics(from: MacroError.warning(s), node: node)
+    static func diagnose(_ error: MacroError, node: SyntaxProtocol) -> Error {
+        return DiagnosticsError(diagnostics: [
+            Diagnostic(node: node, message: error)
+        ])
     }
     
     public static func expansion(
@@ -134,16 +119,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
         guard let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text else {
-            throw DiagnosticsError(diagnostics: [
-                Diagnostic(node: node, message: MacroError.simple("Macro has to be used in a class"))
-            ])
+            throw diagnose(.warning("Macro has to be used in a class"), node: node)
         }
+        
         let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
         let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
         var propertyDeclarations = [PropertyDeclaration]()
-        
-//        var declarationInfo = [DeclarationInfo]()
-//        var declarationInfoD = [DeclarationInfo]()
         
         for member in declaration.memberBlock.members {
             guard let member = member.decl.as(VariableDeclSyntax.self) else {
@@ -171,32 +152,25 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 let diagnostics = recordNameProperties.map {
                     Diagnostic(
                         node: $0.markerAttribute,
-                        message: MacroError.simple("Multiple properties marked with @CKRecordName")
+                        message: MacroError.error("Multiple properties marked with @CKRecordName")
                     )
                 }
                 throw DiagnosticsError(diagnostics: diagnostics)
             }
             
             guard let recordNamePropertyFull = recordNameProperties.first else {
-                throw DiagnosticsError(diagnostics: [
-                    Diagnostic(
-                        node: declaration.introducer,
-                        message: MacroError.simple("Missing property marked with @CKRecordName \(recordNameProperties.map(\.1))")
-                    )
-                ])
+                throw diagnose(.error("Missing property marked with @CKRecordName \(recordNameProperties.map(\.1))"), node: declaration.introducer)
             }
             return recordNamePropertyFull.0
         }
         
         let recordNamePropertyFull = try getRecordName()
-        let recordNameIsOptional = recordNamePropertyFull.type.hasSuffix("?") || recordNamePropertyFull.type.hasPrefix("Optional<")
+        let recordNameIsOptional = recordNamePropertyFull.type.looksLikeOptionalType
         guard recordNamePropertyFull.type == "String" else {
-            let diagnostic = Diagnostic(
-                node: recordNamePropertyFull.typeAnnotationSyntax,
-                //                node: recordNamePropertyFull.1!.type,
-                message: MacroError.simple("Cannot set property of type '\(recordNamePropertyFull.type)' as record name; the record name has to be a 'String'")
+            throw diagnose(
+                .error("Cannot set property of type '\(recordNamePropertyFull.type)' as record name; the record name has to be a 'String'"),
+                node: recordNamePropertyFull.typeAnnotationSyntax
             )
-            throw DiagnosticsError(diagnostics: [diagnostic])
         }
         
         propertyDeclarations = propertyDeclarations.filter { $0.recordNameMarker == nil }
@@ -246,7 +220,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             """
         }
         
-        
         let recordProperties = try Self.makeRecordProperties(
             recordNameProperty: (name: recordNamePropertyFull.identifier, type: recordNamePropertyFull.type),
             recordType: recordTypeName,
@@ -263,55 +236,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         return recordProperties + encodingAndDecodingDeclarations + errorEnums
         
     }
-    
-    static func makeErrorEnums(className: String) throws -> [DeclSyntax] {
-        [
-            try makeEncodingErrorEnum(className: className),
-            try makeDecodingErrorEnum(className: className)
-        ]
-    }
-    
-    static func makeTypeUnwrappingFunc() throws -> [DeclSyntax] {
-        let unwrappedTypeFunc = try FunctionDeclSyntax(
-            """
-            func unwrappedType<T>(of value: T) -> Any.Type {
-                if let ckRecordValue = value as? CKRecordValue {
-                    ckRecordTypeOf(of: ckRecordValue)
-                } else {
-                    Swift.type(of: value as Any)
-                }
-            }
-            """
-        )
-        
-        let ckRecordTypeOfFunc = try FunctionDeclSyntax(
-            """
-            func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
-                Swift.type(of: v as Any)
-            }
-            """
-        )
-        return [
-            DeclSyntax(unwrappedTypeFunc),
-            DeclSyntax(ckRecordTypeOfFunc)
-        ]
-    }
-    
-    static let callWillFinishDecoding = DeclSyntax(
-            """
-            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
-                try delegate.willFinishDecoding(ckRecord: ckRecord)
-            }
-            """
-    )
-    
-    static let callWillFinishEncoding = DeclSyntax(
-            """
-            if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
-                try delegate.willFinishEncoding(ckRecord: record)
-            }
-            """
-    )
     
     static func makeRecordProperties(recordNameProperty: (name: String, type: String), recordType: String, getOnly: Bool) throws -> [DeclSyntax] {
         let synthesizedRecordNameProperty =
@@ -349,56 +273,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         ]
     }
     
-    static func makeEncodingErrorEnum(className: String) throws -> DeclSyntax {
-        let localizedDescriptionEncoding = try VariableDeclSyntax("var localizedDescription: String") {
-            #"""
-            switch self {
-            case .emptyRecordName(let fieldName):
-                return "Error when trying to encode instance of \#(raw: className) to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
-            }
-            """#
-        }
-        
-        let encodingError = try EnumDeclSyntax("enum CKRecordEncodingError: Error") {
-            "case emptyRecordName(fieldName: String)"
-            localizedDescriptionEncoding
-        }
-        
-        return DeclSyntax(encodingError)
-    }
-    
-    static func makeDecodingErrorEnum(className: String) throws -> DeclSyntax {
-        let localizedDescriptionProperty = try VariableDeclSyntax("var localizedDescription: String") {
-            #"""
-            let genericMessage = "Error while trying to initialize an instance of \#(raw: className) from a CKRecord:"
-            let specificReason: String
-            switch self {
-            case let .missingField(fieldName):
-                specificReason = "missing field '\(fieldName)' on CKRecord."
-            case let .fieldTypeMismatch(fieldName, expectedType, foundType):
-                specificReason = "field '\(fieldName)' has type \(foundType) but was expected to have type \(expectedType)."
-            case let .missingDatabase(fieldName):
-                specificReason = "missing database to fetch relationship '\(fieldName)'."
-            case let .errorDecodingNestedField(fieldName, error):
-                specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
-            }
-            return "\(genericMessage) \(specificReason)"
-            """#
-        }
-        
-        let decodingError = try EnumDeclSyntax("enum CKRecordDecodingError: Error") {
-            """
-            case missingField(String)
-            case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
-            case missingDatabase(fieldName: String)
-            case errorDecodingNestedField(fieldName: String, _ error: Error)
-            """
-            localizedDescriptionProperty
-        }
-        
-        return DeclSyntax(decodingError)
-    }
-    
     static func makeDecodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> DeclSyntax {
         var declsDec: [String] = []
         for declaration in declarations {
@@ -406,10 +280,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             let type = declaration.type
             let dec: String
             
-            
-            if specialFields.keys.contains(name) {
-                dec = #"self.\#(name) = ckRecord.\#(name)"#
-            } else if type == "Data" {
+            if type == "Data" {
                 dec = #"""
                 /// Decoding `\#(name)`
                 guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
@@ -449,16 +320,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#
             } else if let referenceMarker = declaration.relationshipMarker {
                 
-                var filteredType = type
-                if filteredType.hasSuffix("?") {
-                    filteredType = String(filteredType.dropLast())
-                }
-                if filteredType.hasPrefix("Optional<") {
-                    filteredType = String(filteredType.dropFirst(9).dropLast())
-                }
-                
-                let isOptional = filteredType != type
-//                let referenceType = declaration.4?.attributes.first?.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name
+                var filteredType = type.wrappedTypeName
+                let isOptional = type.looksLikeOptionalType
                 let referenceType = referenceMarker.referenceType
                 var action = ""
                 if referenceType == "referencesProperty" {
@@ -468,7 +331,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } else if referenceType == "data" {
                     action = "data"
                 } else {
-                    throw DiagnosticsError(diagnostics: [Diagnostic(node: referenceMarker.node, message: MacroError.simple("Unknown reference mode"))])
+                    throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
                 }
                 if referenceType == "referencesProperty" {
                     let isOptional = filteredType != type
@@ -554,7 +417,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     self.\#(name) = try JSONDecoder().decode(\#(filteredType).self, from: \#(name)Data)
                     """#
                 }
-            } else if type.hasSuffix("?") || type.hasPrefix("Optional<") {
+            } else if type.looksLikeOptionalType {
                 dec = #"""
                 /// Decoding `\#(name)`
                 guard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {
@@ -589,9 +452,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             let name = declaration.identifier
             let type = declaration.type
             let enc: String
-            guard specialFields.keys.contains(name) == false else {
-                continue
-            }
+            
             if type == "Data" {
                 enc = #"""
                 let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
@@ -619,7 +480,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 """#
             } else if let referenceMarker = declaration.relationshipMarker {
-                let isOptional = type.hasSuffix("?") ?? false || type.hasPrefix("Optional<") ?? false
+                let isOptional = type.looksLikeOptionalType
                 let referenceType = referenceMarker.referenceType
                 var action = ""
                 if referenceType == "referencesProperty" {
@@ -629,7 +490,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } else if referenceType == "data" {
                     action = "data"
                 } else {
-                    throw DiagnosticsError(diagnostics: [Diagnostic(node: referenceMarker.node, message: MacroError.simple("Unknown reference mode"))])
+                    throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
                 }
                 if referenceType == "referencesProperty" {
                     if isOptional {
@@ -691,21 +552,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 
 extension ConvertibleToCKRecordMacro: ExtensionMacro {
     public static func expansion(of node: AttributeSyntax, attachedTo declaration: some DeclGroupSyntax, providingExtensionsOf type: some TypeSyntaxProtocol, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [ExtensionDeclSyntax] {
-//        context.addDiagnostics(from: MyError(errorDescription: "\(protocols.description)"), node: node)
         let equatableExtension = try ExtensionDeclSyntax("extension \(type.trimmed): SynthesizedCKRecordConvertible {}")
         return [
             equatableExtension
-//            try ExtensionDeclSyntax("extension \(declaration.as(ClassDeclSyntax.self)?.name.trimmed ?? "unknown") { static let i = 20 }")
         ]
     }
 }
-
-import Foundation
-
-struct MyError: LocalizedError {
-    var errorDescription: String?
-}
-
 
 extension String {
     var firstCapitalized: String {
@@ -715,18 +567,23 @@ extension String {
     }
 }
 
-public struct RelationshipMarkerMacro: PeerMacro {
-    public static func expansion(of node: AttributeSyntax, providingPeersOf declaration: some DeclSyntaxProtocol, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
-        []
+
+fileprivate extension String {
+    var looksLikeOptionalType: Bool {
+        self.hasSuffix("?") || self.hasPrefix("Optional<")
+    }
+    
+    var wrappedTypeName: String {
+        var filteredType = self
+        if filteredType.hasSuffix("?") {
+            filteredType = String(filteredType.dropLast())
+        }
+        if filteredType.hasPrefix("Optional<") {
+            filteredType = String(filteredType.dropFirst(9).dropLast())
+        }
+        return filteredType
     }
 }
-
-public struct CKRecordNameMacro: PeerMacro {
-    public static func expansion(of node: AttributeSyntax, providingPeersOf declaration: some DeclSyntaxProtocol, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
-        []
-    }
-}
-
 
 @main
 struct CKMacroPlugin: CompilerPlugin {
