@@ -7,8 +7,10 @@
 
 import Foundation
 import SwiftSyntax
+import SwiftDiagnostics
 
 extension ConvertibleToCKRecordMacro {
+    
     static func makeErrorEnums(className: String) throws -> [DeclSyntax] {
         [
             try makeEncodingErrorEnum(className: className),

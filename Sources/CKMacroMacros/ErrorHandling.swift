@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftSyntax
 import SwiftDiagnostics
 
 enum CustomError: Error, CustomStringConvertible {
@@ -37,6 +38,18 @@ public struct StaticParserError: Error, DiagnosticMessage {
     }
     
     public var severity: DiagnosticSeverity { .error }
+}
+
+func error(_ s: String, node: SyntaxProtocol) -> Error {
+    return DiagnosticsError(diagnostics: [
+        Diagnostic(node: node, message: MacroError.error(s))
+    ])
+}
+
+func diagnose(_ error: MacroError, node: SyntaxProtocol) -> Error {
+    return DiagnosticsError(diagnostics: [
+        Diagnostic(node: node, message: error)
+    ])
 }
 
 enum MacroError: Error, DiagnosticMessage {

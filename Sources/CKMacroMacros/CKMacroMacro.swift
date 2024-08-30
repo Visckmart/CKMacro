@@ -7,111 +7,6 @@ import CloudKit
 
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
-    struct PropertyDeclaration {
-        
-        var parentVariableDeclaration: VariableDeclSyntax
-        var bindingDeclaration: PatternBindingSyntax
-        
-        var identifierSyntax: TokenSyntax
-        var identifier: String
-        
-        var typeAnnotationSyntax: TypeAnnotationSyntax
-        var type: String
-        
-        var recordNameMarker: AttributeSyntax?
-        var relationshipMarker: (node: AttributeSyntax, referenceType: String)?
-        
-        var bindingSpecifier: TokenSyntax
-        var isConstant: Bool
-        var isAlreadyInitialized: Bool
-        
-        init?(parentVariableDeclaration: VariableDeclSyntax, bindingDeclaration: PatternBindingSyntax) throws {
-            self.parentVariableDeclaration = parentVariableDeclaration
-            self.bindingDeclaration = bindingDeclaration
-            
-            // Check static
-            func isModifierStatic(_ modifier: DeclModifierListSyntax.Element) -> Bool {
-                guard let modifier = modifier.as(DeclModifierSyntax.self) else { return false }
-                return modifier.name.trimmed.text == "static"
-            }
-            let isStatic = parentVariableDeclaration.modifiers.contains(where: isModifierStatic)
-            guard isStatic == false else { return nil }
-            
-            // Check computed
-            if let accessors = bindingDeclaration.accessorBlock?.accessors.as(AccessorDeclListSyntax.self) {
-                func hasGetOrSetSpecifier(_ token: AccessorDeclListSyntax.Element) -> Bool {
-                    token.accessorSpecifier == .keyword(.get)
-                    || token.accessorSpecifier == .keyword(.set)
-                }
-                let isComputed = accessors.contains(where: hasGetOrSetSpecifier)
-                guard isComputed == false else { return nil }
-            }
-            
-            // Get identifier
-            guard
-                let identifierSyntax = bindingDeclaration.pattern.as(IdentifierPatternSyntax.self)?.identifier,
-                let identifier = identifierSyntax.identifier
-            else {
-                return nil
-            }
-            self.identifierSyntax = identifierSyntax
-            self.identifier = identifier.name
-            
-            // Get type
-            guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
-                return nil
-            }
-            self.typeAnnotationSyntax = typeAnnotationSyntax
-            self.type = typeAnnotationSyntax.type.trimmed.description
-            
-            // Get markers
-            for attribute in parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self) } {
-                guard let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text else {
-                    continue
-                }
-                if identifier == "CKRecordName" {
-                    recordNameMarker = attribute
-                } else if identifier == "CKReference" {
-                    if
-                        let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
-                        let firstArgument = arguments.first?.expression.as(MemberAccessExprSyntax.self),
-                        let declarationName = firstArgument.declName.baseName.identifier?.name
-                    {
-                        relationshipMarker = (attribute, declarationName)
-                    } else {
-                        throw error("Unable to get reference type for @CKReference", node: attribute)
-                    }
-                    
-                }
-            }
-            
-            
-            self.bindingSpecifier = parentVariableDeclaration.bindingSpecifier
-            self.isConstant = bindingSpecifier == .keyword(.let)
-            self.isAlreadyInitialized = isConstant && bindingDeclaration.initializer != nil
-            
-            guard recordNameMarker == nil || relationshipMarker == nil else {
-                throw error(
-                    "A property cannot be marked with @CKRecordName and @CKReference simultaneously",
-                    node: parentVariableDeclaration
-                )
-            }
-        }
-        
-    }
-    
-    static func error(_ s: String, node: SyntaxProtocol) -> Error {
-        return DiagnosticsError(diagnostics: [
-            Diagnostic(node: node, message: MacroError.error(s))
-        ])
-    }
-    
-    static func diagnose(_ error: MacroError, node: SyntaxProtocol) -> Error {
-        return DiagnosticsError(diagnostics: [
-            Diagnostic(node: node, message: error)
-        ])
-    }
-    
     public static func expansion(
         of node: AttributeSyntax,
         providingMembersOf declaration: some DeclGroupSyntax,
@@ -121,18 +16,26 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         guard let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text else {
             throw diagnose(.warning("Macro has to be used in a class"), node: node)
         }
+//        throw diagnose(.error("\(className)"), node: node)
+        let recordTypeName: String
+        if let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first {
+            guard let stringValue = firstMacroArgument.expression.as(StringLiteralExprSyntax.self) else {
+                throw diagnose(.error("Record type must be defined by a string literal"), node: declaration)
+            }
+            recordTypeName = stringValue.description
+        } else {
+            recordTypeName = className
+        }
         
-        let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.trimmed.description
-        let recordTypeName = firstMacroArgument ?? "\"\(className ?? "unknown")\""
         var propertyDeclarations = [PropertyDeclaration]()
         
         for member in declaration.memberBlock.members {
-            guard let member = member.decl.as(VariableDeclSyntax.self) else {
+            guard let variableDeclaration = member.decl.as(VariableDeclSyntax.self) else {
                 continue
             }
-            for binding in member.bindings {
+            for binding in variableDeclaration.bindings {
                 let propertyDeclaration = try PropertyDeclaration(
-                    parentVariableDeclaration: member,
+                    parentVariableDeclaration: variableDeclaration,
                     bindingDeclaration: binding
                 )
                 if let propertyDeclaration {
@@ -159,9 +62,9 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
             
             guard let recordNamePropertyFull = recordNameProperties.first else {
-                throw diagnose(.error("Missing property marked with @CKRecordName \(recordNameProperties.map(\.1))"), node: declaration.introducer)
+                throw diagnose(.error("Missing property marked with @CKRecordName \(recordNameProperties.map(\.markerAttribute))"), node: declaration.introducer)
             }
-            return recordNamePropertyFull.0
+            return recordNamePropertyFull.propertyDeclaration
         }
         
         let recordNamePropertyFull = try getRecordName()
@@ -383,7 +286,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     dec =
                     isOptional
                     ? """
-                    // \(referenceType)
+                    /// Decoding relationship `\(name)`
                     let \(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
                     let \(name)Query = CKQuery(recordType: \(filteredType).__recordType, predicate: NSPredicate(format: "\(mainName.dropFirst().dropLast())Owner == %@", \(name)OwnerReference))
                     do {
@@ -401,6 +304,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                       
                     """
                     : #"""
+                    /// Decoding relationship `\#(name)`
                     guard let database else {
                         throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                     }
@@ -411,10 +315,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     """#
                 } else {
                     dec = #"""
+                    /// Decoding relationship `\#(name)`
                     guard \#(name)Data = ckRecord["\#(name)"] as? Data\#(isOptional ? "?" : "") else {
                         throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
                     }
                     self.\#(name) = try JSONDecoder().decode(\#(filteredType).self, from: \#(name)Data)
+                    
                     """#
                 }
             } else if type.looksLikeOptionalType {
@@ -455,6 +361,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             
             if type == "Data" {
                 enc = #"""
+                /// Encoding `\#(name)`
                 let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
                 do {
                     try self.\#(name).write(to: \#(name)TemporaryAssetURL)
@@ -466,6 +373,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#
             } else if type == "[Data]" {
                 enc = #"""
+                /// Encoding `\#(name)`
                 var \#(name)Assets = [CKAsset]()
                 for data in self.\#(name) {
                     let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
@@ -495,7 +403,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 if referenceType == "referencesProperty" {
                     if isOptional {
                         enc = #"""
-                        /// Relationship `\#(name)`
+                        /// Encoding relationship `\#(name)`
                         if let \#(name) {
                             let childRecord = try \#(name).convertToCKRecord()
                             record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action:   \#(action))
@@ -505,7 +413,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         """#
                     } else {
                         enc = #"""
-                        /// Relationship `\#(name)`
+                        /// Encoding relationship `\#(name)`
                         let childRecord = try \#(name).convertToCKRecord()
                         record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(action))
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
@@ -515,7 +423,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } else if referenceType == "isReferencedByProperty" {
                     if isOptional {
                         enc = #"""
-                        /// Relationship `\#(name)`
+                        /// Encoding relationship `\#(name)`
                         if let \#(name) {
                             let childRecord = try \#(name).convertToCKRecord()
                             childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
@@ -525,7 +433,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         """#
                     } else {
                         enc = #"""
-                        /// Relationship `\#(name)`
+                        /// Encoding relationship `\#(name)`
                         let childRecord = try \#(name).convertToCKRecord()
                         childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
@@ -534,7 +442,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                 } else {
                     enc = """
-                    /// Relationship `\(name)`
+                    /// Encoding relationship `\(name)`
                     let encoded\(name) = try JSONEncoder().encode(\(name))
                     record["\(name)"] = encoded\(name)
                     
