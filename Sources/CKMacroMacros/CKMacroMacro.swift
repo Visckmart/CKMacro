@@ -250,18 +250,18 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         isOptional
                         ? #"""
                     if let \#(name)Reference {
-                        guard let database else {
+                        guard let \#(name)Database = database else {
                            throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                         }
                         var \#(name)Record: CKRecord?
                         do {
-                            \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
+                            \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
                         } catch CKError.unknownItem {
                             \#(name)Record = nil
                         }
                         if let \#(name)Record {
                             do {
-                                let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: database)
+                                let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
                                 self.\#(name) = \#(name)
                             } catch {
                                 throw CKRecordDecodingError.errorDecodingNestedField(fieldName: "\#(name)", error)
@@ -273,11 +273,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                       
                     """#
                         : #"""
-                    guard let database else {
+                    guard let \#(name)Database = database else {
                         throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                     }
-                    let \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
-                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: database)
+                    let \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
+                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
                     self.\#(name) = \#(name)
                     
                     """#
@@ -290,12 +290,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     let \(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
                     let \(name)Query = CKQuery(recordType: \(filteredType).__recordType, predicate: NSPredicate(format: "\(mainName.dropFirst().dropLast())Owner == %@", \(name)OwnerReference))
                     do {
-                        let \(name)FetchResponse = try await database?.records(matching: \(name)Query)
+                        let \(name)FetchResponse = try await \(name)Database?.records(matching: \(name)Query)
                         guard let \(name)FetchedRecords = \(name)FetchResponse?.0.compactMap({try? $0.1.get()}) else {
                             throw CKRecordDecodingError.missingField("erro curriculum")
                         }
                         if let record = \(name)FetchedRecords.first {
-                            \(name) = try await \(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: database)
+                            \(name) = try await \(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \(name)Database)
                         }
                     } catch CKError.invalidArguments {
                         print("invalid arguments")
@@ -305,11 +305,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     """
                     : #"""
                     /// Decoding relationship `\#(name)`
-                    guard let database else {
+                    guard let \#(name)Database = database else {
                         throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                     }
-                    let \#(name)Record = try await database.record(for: \#(name)Reference.recordID)
-                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: database)
+                    let \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
+                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
                     self.\#(name) = \#(name)
                     
                     """#

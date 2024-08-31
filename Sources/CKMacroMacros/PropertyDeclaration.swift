@@ -39,12 +39,18 @@ struct PropertyDeclaration {
         guard isStatic == false else { return nil }
         
         // Check computed
+        if let accessors = bindingDeclaration.accessorBlock?.accessors.as(CodeBlockItemListSyntax.self) {
+            return nil
+        }
+        
         if let accessors = bindingDeclaration.accessorBlock?.accessors.as(AccessorDeclListSyntax.self) {
             func hasGetOrSetSpecifier(_ token: AccessorDeclListSyntax.Element) -> Bool {
-                token.accessorSpecifier == .keyword(.get)
-                || token.accessorSpecifier == .keyword(.set)
+                token.accessorSpecifier.text == "get"
+                || token.accessorSpecifier.text == "set"
             }
             let isComputed = accessors.contains(where: hasGetOrSetSpecifier)
+            
+            
             guard isComputed == false else { return nil }
         }
         
@@ -57,6 +63,7 @@ struct PropertyDeclaration {
         }
         self.identifierSyntax = identifierSyntax
         self.identifier = identifier.name
+        
         
         // Get type
         guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
