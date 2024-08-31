@@ -431,9 +431,9 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     } else {
                         enc = #"""
                         /// Encoding relationship `\#(name)`
-                        let childRecord = try \#(name).convertToCKRecord()
-                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: \#(action))
-                        relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        let \#(name)ChildRecord = try \#(name).convertToCKRecord()
+                        record["\#(name)"] = CKRecord.Reference(recordID: \#(name)ChildRecord.0.recordID, action: \#(action))
+                        relationshipRecords.append(contentsOf: [\#(name)ChildRecord.0] + \#(name)ChildRecord.1)
                         
                         """#
                     }
