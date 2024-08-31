@@ -60,7 +60,7 @@ enum MacroError: Error, DiagnosticMessage {
     var message: String {
         switch self {
         case .error(let string), .warning(let string):
-            return string
+            return "[CKMacro] " + string
         }
     }
     

@@ -89,11 +89,17 @@ public enum ReferenceType {
 }
 @attached(peer)
 public macro CKReference(_ referenceType: ReferenceType) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
+
 @attached(peer)
 public macro CKRecordName() = #externalMacro(module: "CKMacroMacros", type: "CKRecordNameMacro")
 //@attached(peer)
 //public macro CKEncode(with: (CKRecord) -> CKRecordValue) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro2")
 //
+public enum PropertyType {
+    case rawValue
+}
+@attached(peer)
+public macro CKPropertyType(_ propertyType: PropertyType) = #externalMacro(module: "CKMacroMacros", type: "CKPropertyTypeMacro")
 //@attached(peer)
 //public macro CKDecode(with: () -> CKRecordValue) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro2")
 

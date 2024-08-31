@@ -21,6 +21,7 @@ struct PropertyDeclaration {
     
     var recordNameMarker: AttributeSyntax?
     var relationshipMarker: (node: AttributeSyntax, referenceType: String)?
+    var propertyTypeMarker: (node: AttributeSyntax, propertyType: String)?
     
     var bindingSpecifier: TokenSyntax
     var isConstant: Bool
@@ -67,7 +68,7 @@ struct PropertyDeclaration {
         
         // Get type
         guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
-            return nil
+            throw diagnose(.error("Missing type annotation"), node: bindingDeclaration)
         }
         self.typeAnnotationSyntax = typeAnnotationSyntax
         self.type = typeAnnotationSyntax.type.trimmed.description
@@ -101,7 +102,22 @@ struct PropertyDeclaration {
                 } else {
                     throw error("Unable to get reference type for @CKReference", node: attribute)
                 }
-                
+            } else if identifier == "CKPropertyType" {
+                guard recordNameMarker == nil else {
+                    throw diagnose(
+                        .error("Duplicate @CKPropertyType markers on property '\(identifier)'"),
+                        node: attribute
+                    )
+                }
+                if
+                    let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
+                    let firstArgument = arguments.first?.expression.as(MemberAccessExprSyntax.self),
+                    let declarationName = firstArgument.declName.baseName.identifier?.name
+                {
+                    propertyTypeMarker = (attribute, declarationName)
+                } else {
+                    throw error("Unable to get reference type for @CKRecordType", node: attribute)
+                }
             }
         }
         
@@ -110,9 +126,9 @@ struct PropertyDeclaration {
         self.isConstant = bindingSpecifier == .keyword(.let)
         self.isAlreadyInitialized = isConstant && bindingDeclaration.initializer != nil
         
-        guard recordNameMarker == nil || relationshipMarker == nil else {
+            guard recordNameMarker == nil || relationshipMarker == nil || propertyTypeMarker == nil else {
             throw error(
-                "A property cannot be marked with @CKRecordName and @CKReference simultaneously",
+                "A property cannot be marked with multiple markers simultaneously",
                 node: parentVariableDeclaration
             )
         }

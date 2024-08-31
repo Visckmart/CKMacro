@@ -7,15 +7,17 @@ import CloudKit
 
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
+    
     public static func expansion(
         of node: AttributeSyntax,
         providingMembersOf declaration: some DeclGroupSyntax,
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        guard let className = declaration.as(ClassDeclSyntax.self)?.name.trimmed.text else {
+        guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
             throw diagnose(.warning("Macro has to be used in a class"), node: node)
         }
+        let className = classDecl.name.trimmed.text
 //        throw diagnose(.error("\(className)"), node: node)
         let recordTypeName: String
         if let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first {
@@ -62,7 +64,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
             
             guard let recordNamePropertyFull = recordNameProperties.first else {
-                throw diagnose(.error("Missing property marked with @CKRecordName \(recordNameProperties.map(\.markerAttribute))"), node: declaration.introducer)
+                throw diagnose(.error("Missing property marked with @CKRecordName in '\(className)' class"), node: classDecl.name)
             }
             return recordNamePropertyFull.propertyDeclaration
         }
@@ -332,7 +334,22 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 self.\#(name) = \#(name)
                 
                 """#
+            } else if let propertyTypeMarker = declaration.propertyTypeMarker {
                 
+                dec = #"""
+                /// Decoding `\#(name)`
+                guard let stored\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
+                    throw CKRecordDecodingError.missingField("\#(name)")
+                }
+                guard let rawValue\#(name.firstCapitalized) = stored\#(name.firstCapitalized) as? \#(type).RawValue else {
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: stored\#(name.firstCapitalized)))")
+                }
+                guard let \#(name) = \#(type)(rawValue: rawValue\#(name.firstCapitalized)) else {
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: rawValue\#(name.firstCapitalized)))")
+                }
+                self.\#(name) = \#(name)
+                
+                """#
             } else {
                 dec = #"""
                 /// Decoding `\#(name)`
@@ -440,6 +457,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         
                         """#
                     }
+                    
                 } else {
                     enc = """
                     /// Encoding relationship `\(name)`
@@ -448,6 +466,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     
                     """
                 }
+            } else if let propertyTypeMarker = declaration.propertyTypeMarker {
+                enc = #"record["\#(name)"] = self.\#(name).rawValue"#
             } else {
                 enc = #"record["\#(name)"] = self.\#(name)"#
             }
@@ -498,6 +518,7 @@ struct CKMacroPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ConvertibleToCKRecordMacro.self,
         RelationshipMarkerMacro.self,
-        CKRecordNameMacro.self
+        CKRecordNameMacro.self,
+        CKPropertyTypeMacro.self
     ]
 }
