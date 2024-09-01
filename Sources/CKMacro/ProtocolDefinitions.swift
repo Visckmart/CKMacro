@@ -39,7 +39,7 @@ public extension SynthesizedCKRecordConvertible {
     }
 }
     
-extension SynthesizedCKRecordConvertible {
+public extension SynthesizedCKRecordConvertible {
     static func fetch(withRecordName recordName: String, fromCKDatabase database: CKDatabase) async throws -> Self {
         let fetchedRecord = try await database.record(for: CKRecord.ID(recordName: recordName))
         return try await Self(fromCKRecord: fetchedRecord, fetchingRelationshipsFrom: database)

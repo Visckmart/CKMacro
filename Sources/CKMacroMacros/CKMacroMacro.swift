@@ -345,12 +345,23 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     
                     """#
                 } else if propertyTypeMarker.propertyType == "data" {
+                    
                     dec = #"""
                     /// Decoding relationship `\#(name)`
                     guard let \#(name)Data = ckRecord["\#(name)"] as? Data\#(type.looksLikeOptionalType ? "?" : "") else {
                         throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
                     }
                     self.\#(name) = try JSONDecoder().decode(\#(type.wrappedTypeName).self, from: \#(name)Data)
+                    
+                    """#
+                } else if propertyTypeMarker.propertyType == "nsCoding" {
+                    
+                    dec = #"""
+                    /// Decoding relationship `\#(name)`
+                    guard let \#(name)Data = ckRecord["\#(name)"] as? Data\#(type.looksLikeOptionalType ? "?" : "") else {
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                    }
+                    self.\#(name) = try\#(type.looksLikeOptionalType ? "?" : "") NSKeyedUnarchiver.unarchivedObject(ofClass: \#(type.wrappedTypeName).self, from: \#(name)Data)!
                     
                     """#
                 } else {
@@ -462,6 +473,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     /// Encoding relationship `\(name)`
                     let encoded\(name) = try JSONEncoder().encode(\(name))
                     record["\(name)"] = encoded\(name)
+                    
+                    """
+                } else if propertyTypeMarker.propertyType == "nsCoding" {
+                    enc = """
+                    /// Encoding relationship `\(name)`
+                    record["\(name)"] = try\(type.looksLikeOptionalType ? "?" : "") NSKeyedArchiver.archivedData(withRootObject: self.\(name), requiringSecureCoding: false)
                     
                     """
                 } else {
