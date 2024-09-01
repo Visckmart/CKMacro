@@ -107,13 +107,16 @@ struct PropertyDeclaration {
                 if let firstArgumentExpression = arguments.first?.expression.as(FunctionCallExprSyntax.self) {
                     let relationshipInfo = firstArgumentExpression.arguments.as(LabeledExprListSyntax.self)
                     
-                    guard let declarationName = firstArgumentExpression.calledExpression.as(MemberAccessExprSyntax.self)?.declName.baseName.identifier?.name else {
-                        throw error("2", node: attribute)
+                    guard
+                        let declarationExpression = firstArgumentExpression.calledExpression.as(MemberAccessExprSyntax.self),
+                        let declarationName = declarationExpression.declName.baseName.identifier?.name
+                    else {
+                        throw error("Unable to get reference type for @CKReference", node: attribute)
                     }
                     
                     let namedExpression = relationshipInfo?.first(where: {$0.label?.text == "named"})?.expression
                     guard let namedExpression = namedExpression?.as(StringLiteralExprSyntax.self) else {
-                        throw error("3", node: attribute)
+                        throw error("Field name must be a string literal", node: attribute)
                     }
                     relationshipMarker = (attribute, declarationName, namedExpression.representedLiteralValue)
                 } else if
@@ -143,37 +146,19 @@ struct PropertyDeclaration {
                         let guaranteedInitialization = type.looksLikeOptionalType || bindingDeclaration.initializer != nil
                         guard guaranteedInitialization else {
                             var fixIts: [FixIt] = []
-                            if var identifierType = typeAnnotationSyntax.type.as(IdentifierTypeSyntax.self) {
-                                var optionalType = typeAnnotationSyntax
-                                var name = identifierType.name
-                                name = TokenSyntax(
-                                    .identifier("\(name.text)?"),
-                                    leadingTrivia: name.leadingTrivia,
-                                    trailingTrivia: name.trailingTrivia,
-                                    presence: name.presence
-                                )
-                                identifierType.name = name
-                                optionalType.type = TypeSyntax(identifierType)
-                                fixIts.append(
-                                    FixIt(message: MacroError.fixit("Make optional"), changes: [
-                                        FixIt.Change.replace(oldNode: Syntax(typeAnnotationSyntax), newNode: Syntax(optionalType))
-                                    ])
-                                )
+                            if let optionalFixIt = FixItTemplates.addOptional(toType: typeAnnotationSyntax) {
+                                fixIts.append(optionalFixIt)
                             }
+                            let initializerFixIt = FixItTemplates.addInitializer(toDeclaration: bindingDeclaration)
+                            fixIts.append(initializerFixIt)
                             
-                            var initializerDeclaration = bindingDeclaration
-                            initializerDeclaration.initializer = InitializerClauseSyntax(equal: TokenSyntax(" = "), value: ExprSyntax("<#value#>"))
-                            fixIts.append(
-                                FixIt(message: MacroError.fixit("Add initializer"), changes: [
-                                    FixIt.Change.replace(oldNode: Syntax(bindingDeclaration), newNode: Syntax(initializerDeclaration))
-                                ])
-                            )
                             throw diagnose(
                                 .error("Ignored property '\(self.identifier)' must be an optional or have an initializer"),
                                 node: propertyTypeMarker?.node ?? parentVariableDeclaration,
                                 fixIts: fixIts
                             )
                         }
+                        
                         return nil
                     }
                     propertyTypeMarker = (attribute, declarationName)

@@ -82,8 +82,43 @@ enum MacroError: Error, DiagnosticMessage {
 extension MacroError: FixItMessage {
     var fixItID: MessageID { diagnosticID }
 }
-//extension MacroError: ExpressibleByStringLiteral {
-//    init(stringLiteral value: StringLiteralType) {
-//        self = .simple(value)
-//    }
-//}
+
+
+func makeTypeOptional(_ typeAnnotationSyntax: TypeAnnotationSyntax) -> TypeAnnotationSyntax? {
+    guard var identifierType = typeAnnotationSyntax.type.as(IdentifierTypeSyntax.self) else {
+        return nil
+    }
+    var optionalType = typeAnnotationSyntax
+    var name = identifierType.name
+    name = TokenSyntax(
+        .identifier("\(name.text)?"),
+        leadingTrivia: name.leadingTrivia,
+        trailingTrivia: name.trailingTrivia,
+        presence: name.presence
+    )
+    identifierType.name = name
+    optionalType.type = TypeSyntax(identifierType)
+    return optionalType
+}
+
+
+enum FixItTemplates {
+    
+    static func addOptional(toType typeAnnotationSyntax: TypeAnnotationSyntax) -> FixIt? {
+        guard let optionalType = makeTypeOptional(typeAnnotationSyntax) else {
+            return nil
+        }
+        return FixIt(message: MacroError.fixit("Make optional"), changes: [
+            FixIt.Change.replace(oldNode: Syntax(typeAnnotationSyntax), newNode: Syntax(optionalType))
+        ])
+    }
+    
+    static func addInitializer(toDeclaration bindingDeclaration: PatternBindingSyntax) -> FixIt {
+        var initializerDeclaration = bindingDeclaration
+        initializerDeclaration.initializer = InitializerClauseSyntax(equal: TokenSyntax(" = "), value: ExprSyntax("<#value#>"))
+        return FixIt(message: MacroError.fixit("Add initializer"), changes: [
+            FixIt.Change.replace(oldNode: Syntax(bindingDeclaration), newNode: Syntax(initializerDeclaration))
+        ])
+    }
+    
+}
