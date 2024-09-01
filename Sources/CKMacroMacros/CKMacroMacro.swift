@@ -91,7 +91,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         ) {
             try Self.makeTypeUnwrappingFunc()
             
-            "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName"
+            "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName\n"
             
             decodingCodeBlock
             
@@ -232,7 +232,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 let isOptional = type.looksLikeOptionalType
                 let databaseCheck = #"""
                     guard let \#(name)Database = database else {
-                       throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
+                        throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                     }
                     """#
                 
@@ -327,31 +327,35 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     """#
                 } else {
                     throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
-                    dec = #"""
-                    /// Decoding relationship `\#(name)`
-                    guard \#(name)Data = ckRecord["\#(name)"] as? Data\#(isOptional ? "?" : "") else {
-                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
-                    }
-                    self.\#(name) = try JSONDecoder().decode(\#(filteredType).self, from: \#(name)Data)
-                    
-                    """#
                 }
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
-                
-                dec = #"""
-                /// Decoding `\#(name)`
-                guard let stored\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
-                    throw CKRecordDecodingError.missingField("\#(name)")
+                if propertyTypeMarker.propertyType == "rawValue" {
+                    dec = #"""
+                    /// Decoding `\#(name)`
+                    guard let stored\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
+                        throw CKRecordDecodingError.missingField("\#(name)")
+                    }
+                    guard let rawValue\#(name.firstCapitalized) = stored\#(name.firstCapitalized) as? \#(type).RawValue else {
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: stored\#(name.firstCapitalized)))")
+                    }
+                    guard let \#(name) = \#(type)(rawValue: rawValue\#(name.firstCapitalized)) else {
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: rawValue\#(name.firstCapitalized)))")
+                    }
+                    self.\#(name) = \#(name)
+                    
+                    """#
+                } else if propertyTypeMarker.propertyType == "data" {
+                    dec = #"""
+                    /// Decoding relationship `\#(name)`
+                    guard let \#(name)Data = ckRecord["\#(name)"] as? Data\#(type.looksLikeOptionalType ? "?" : "") else {
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                    }
+                    self.\#(name) = try JSONDecoder().decode(\#(type.wrappedTypeName).self, from: \#(name)Data)
+                    
+                    """#
+                } else {
+                    throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
                 }
-                guard let rawValue\#(name.firstCapitalized) = stored\#(name.firstCapitalized) as? \#(type).RawValue else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: stored\#(name.firstCapitalized)))")
-                }
-                guard let \#(name) = \#(type)(rawValue: rawValue\#(name.firstCapitalized)) else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: rawValue\#(name.firstCapitalized)))")
-                }
-                self.\#(name) = \#(name)
-                
-                """#
             } else if type.looksLikeOptionalType {
                 dec = #"""
                 /// Decoding `\#(name)`
@@ -449,15 +453,20 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         """
                 } else {
                     throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
+                }
+            } else if let propertyTypeMarker = declaration.propertyTypeMarker {
+                if propertyTypeMarker.propertyType == "rawValue" {
+                    enc = #"record["\#(name)"] = self.\#(name).rawValue"#
+                } else if propertyTypeMarker.propertyType == "data" {
                     enc = """
                     /// Encoding relationship `\(name)`
                     let encoded\(name) = try JSONEncoder().encode(\(name))
                     record["\(name)"] = encoded\(name)
                     
                     """
+                } else {
+                    throw diagnose(.error("Unknown reference mode"), node: propertyTypeMarker.node)
                 }
-            } else if let propertyTypeMarker = declaration.propertyTypeMarker {
-                enc = #"record["\#(name)"] = self.\#(name).rawValue"#
             } else {
                 enc = #"record["\#(name)"] = self.\#(name)"#
             }
