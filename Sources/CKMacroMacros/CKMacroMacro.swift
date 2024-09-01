@@ -89,13 +89,17 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         let initFromCKRecord = try InitializerDeclSyntax(
             "required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws"
         ) {
+            #"print("Init from \#(raw: className)")\#n "#
             try Self.makeTypeUnwrappingFunc()
             
             "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName\n"
             
             decodingCodeBlock
-            
+            if className == "Curriculum" {
+                "\nself.delayedInit = true\n"
+            }
             callWillFinishDecoding
+            
         }
         
         let convertToCKRecordSetup = try CodeBlockSyntax(
@@ -280,13 +284,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                                           ? fetchOptionallyReferencedProperty
                                           : fetchReferencedProperty)
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
+                    let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast())Owner"
                     dec =
                     isOptional
                     ? """
                     /// Decoding relationship `\(name)`
                     \(databaseCheck)
                     let \(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
-                    let \(name)Query = CKQuery(recordType: \(filteredType).__recordType, predicate: NSPredicate(format: "\(mainName.dropFirst().dropLast())Owner == %@", \(name)OwnerReference))
+                    let \(name)Query = CKQuery(recordType: \(filteredType).__recordType, predicate: NSPredicate(format: "\(ownedFieldName) == %@", \(name)OwnerReference))
                     do {
                         let \(name)FetchResponse = try await \(name)Database.records(matching: \(name)Query)
                         guard \(name)FetchResponse.0.count <= 1 else {
@@ -300,6 +305,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         }
                     } catch CKError.unknownItem {
                         self.\(name) = nil
+                    } catch CKError.invalidArguments {
+                        self.\(name) = nil
                     }
                       
                     """
@@ -308,7 +315,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     /// Decoding relationship `\#(name)`
                     \#(databaseCheck)
                     let \#(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
-                    let \#(name)Query = CKQuery(recordType: \#(filteredType).__recordType, predicate: NSPredicate(format: "\#(mainName.dropFirst().dropLast())Owner == %@", \#(name)OwnerReference))
+                    let \#(name)Query = CKQuery(recordType: \#(filteredType).__recordType, predicate: NSPredicate(format: "\#(ownedFieldName) == %@", \#(name)OwnerReference))
                     do {
                         let \#(name)FetchResponse = try await \#(name)Database.records(matching: \#(name)Query)
                         guard \#(name)FetchResponse.0.count <= 1 else {
@@ -441,7 +448,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                     """
                 }
-                
                 if referenceMarker.referenceType == "referencesProperty" {
                     let rela = #"""
                             let childRecord = try \#(name).convertToCKRecord()
@@ -453,9 +459,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         \(isOptional ? ifLetWrapper(content: rela) : rela)
                         """
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
+                    let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast)Owner"
                     let rela = #"""
                             let childRecord = try \#(name).convertToCKRecord()
-                            childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: .deleteSelf)
+                            childRecord.0["\#(ownedFieldName)"] = CKRecord.Reference(recordID: record.recordID, action: .deleteSelf)
                             relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                             """#
                     enc = """
@@ -512,7 +519,7 @@ extension String {
 }
 
 
-fileprivate extension String {
+extension String {
     var looksLikeOptionalType: Bool {
         (self.hasSuffix("?") || self.hasPrefix("Optional<")) && self.count > 1
     }

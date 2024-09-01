@@ -34,7 +34,7 @@ public struct StaticParserError: Error, DiagnosticMessage {
     }
     
     public var diagnosticID: MessageID {
-        MessageID(domain: "ckmacro", id: "\(type(of: self)).\(messageID)")
+        MessageID(domain: "ckmacro\(Int.random(in: 1...100))", id: "\(type(of: self)).\(messageID)")
     }
     
     public var severity: DiagnosticSeverity { .error }

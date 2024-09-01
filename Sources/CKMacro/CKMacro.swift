@@ -14,9 +14,9 @@ public macro CKRecordName() = #externalMacro(module: "CKMacroMacros", type: "CKR
 
 public enum ReferenceType {
     case referencesProperty
-    case isReferencedByProperty(weakReference: Bool)
+    case isReferencedByProperty(named: String? = nil, weakReference: Bool = true)
 //    case isStronglyReferencedByProperty
-    public static let isReferencedByProperty = isReferencedByProperty(weakReference: true)
+    public static let isReferencedByProperty = isReferencedByProperty()
 //    case data
 }
 @attached(peer)
@@ -26,6 +26,7 @@ public enum PropertyType {
     case rawValue
     case codable
     case nsCoding
+    case ignored
 }
 @attached(peer)
 public macro CKPropertyType(_ propertyType: PropertyType) = #externalMacro(module: "CKMacroMacros", type: "CKPropertyTypeMacro")
