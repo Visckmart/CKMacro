@@ -57,7 +57,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 let diagnostics = recordNameProperties.map {
                     Diagnostic(
                         node: $0.markerAttribute,
-                        message: MacroError.error("Multiple properties marked with @CKRecordName")
+                        message: MacroError.error("Multiple properties marked with @CKRecordName"),
+                        fixIt: FixIt(message: MacroError.fixit("Remove marker from '\($0.propertyDeclaration.identifier)' property"), changes: [
+                            FixIt.Change.replace(oldNode: Syntax($0.markerAttribute), newNode: Syntax(ExprSyntax("")))
+                        ])
                     )
                 }
                 throw DiagnosticsError(diagnostics: diagnostics)
@@ -325,15 +328,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     
                     """#
                 }
-            } else if type.looksLikeOptionalType {
-                dec = #"""
-                /// Decoding `\#(name)`
-                guard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
-                }
-                self.\#(name) = \#(name)
-                
-                """#
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
                 
                 dec = #"""
@@ -346,6 +340,15 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
                 guard let \#(name) = \#(type)(rawValue: rawValue\#(name.firstCapitalized)) else {
                     throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: rawValue\#(name.firstCapitalized)))")
+                }
+                self.\#(name) = \#(name)
+                
+                """#
+            } else if type.looksLikeOptionalType {
+                dec = #"""
+                /// Decoding `\#(name)`
+                guard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
                 }
                 self.\#(name) = \#(name)
                 
@@ -498,7 +501,7 @@ extension String {
 
 fileprivate extension String {
     var looksLikeOptionalType: Bool {
-        self.hasSuffix("?") || self.hasPrefix("Optional<")
+        (self.hasSuffix("?") || self.hasPrefix("Optional<")) && self.count > 1
     }
     
     var wrappedTypeName: String {

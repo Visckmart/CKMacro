@@ -46,9 +46,9 @@ func error(_ s: String, node: SyntaxProtocol) -> Error {
     ])
 }
 
-func diagnose(_ error: MacroError, node: SyntaxProtocol) -> Error {
+func diagnose(_ error: MacroError, node: SyntaxProtocol, fixIts: [FixIt] = []) -> Error {
     return DiagnosticsError(diagnostics: [
-        Diagnostic(node: node, message: error)
+        Diagnostic(node: node, message: error, fixIts: fixIts)
     ])
 }
 
@@ -56,11 +56,14 @@ enum MacroError: Error, DiagnosticMessage {
     
     case error(String)
     case warning(String)
+    case fixit(String)
     
     var message: String {
         switch self {
         case .error(let string), .warning(let string):
             return "[CKMacro] " + string
+        case .fixit(let string):
+            return string
         }
     }
     
@@ -70,12 +73,15 @@ enum MacroError: Error, DiagnosticMessage {
     
     var severity: SwiftDiagnostics.DiagnosticSeverity {
         switch self {
-        case .error(let string): .error
-        case .warning(let string): .warning
+        case .error: .error
+        case .warning: .warning
+        case .fixit: .note
         }
     }
 }
-
+extension MacroError: FixItMessage {
+    var fixItID: MessageID { diagnosticID }
+}
 //extension MacroError: ExpressibleByStringLiteral {
 //    init(stringLiteral value: StringLiteralType) {
 //        self = .simple(value)

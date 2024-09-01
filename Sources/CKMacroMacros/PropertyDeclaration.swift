@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftSyntax
+import SwiftDiagnostics
 
 struct PropertyDeclaration {
     
@@ -68,7 +69,12 @@ struct PropertyDeclaration {
         
         // Get type
         guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
-            throw diagnose(.error("Missing type annotation"), node: bindingDeclaration)
+            var newBindingDeclaration = bindingDeclaration
+            newBindingDeclaration.typeAnnotation = TypeAnnotationSyntax(type: IdentifierTypeSyntax(name: " <#Type#> "), trailingTrivia: bindingDeclaration.trailingTrivia)
+            newBindingDeclaration.pattern = newBindingDeclaration.pattern.trimmed
+            throw diagnose(.error("Missing type annotation"), node: bindingDeclaration, fixIts: [
+                FixIt(message: MacroError.fixit("Add type annotation"), changes: [FixIt.Change.replace(oldNode: Syntax(bindingDeclaration), newNode: Syntax(newBindingDeclaration))])
+            ])
         }
         self.typeAnnotationSyntax = typeAnnotationSyntax
         self.type = typeAnnotationSyntax.type.trimmed.description
@@ -87,7 +93,7 @@ struct PropertyDeclaration {
                 }
                 recordNameMarker = attribute
             } else if identifier == "CKReference" {
-                guard recordNameMarker == nil else {
+                guard relationshipMarker == nil else {
                     throw diagnose(
                         .error("Duplicate @CKReference marker on property '\(identifier)'"),
                         node: attribute
@@ -103,7 +109,7 @@ struct PropertyDeclaration {
                     throw error("Unable to get reference type for @CKReference", node: attribute)
                 }
             } else if identifier == "CKPropertyType" {
-                guard recordNameMarker == nil else {
+                guard propertyTypeMarker == nil else {
                     throw diagnose(
                         .error("Duplicate @CKPropertyType markers on property '\(identifier)'"),
                         node: attribute
@@ -126,11 +132,14 @@ struct PropertyDeclaration {
         self.isConstant = bindingSpecifier == .keyword(.let)
         self.isAlreadyInitialized = isConstant && bindingDeclaration.initializer != nil
         
-            guard recordNameMarker == nil || relationshipMarker == nil || propertyTypeMarker == nil else {
-            throw error(
-                "A property cannot be marked with multiple markers simultaneously",
-                node: parentVariableDeclaration
-            )
+        guard [recordNameMarker, relationshipMarker?.node, propertyTypeMarker?.node].compactMap { $0 }.count <= 1 else {
+            throw DiagnosticsError(diagnostics: [
+                Diagnostic(node: parentVariableDeclaration, message: MacroError.error("A property cannot be marked with multiple markers simultaneously"), highlights: [recordNameMarker, relationshipMarker?.node, propertyTypeMarker?.node].compactMap { Syntax($0) })
+            ])
+//            throw error(
+//                "A property cannot be marked with multiple markers simultaneously",
+//                node: parentVariableDeclaration
+//            )
         }
     }
 }
