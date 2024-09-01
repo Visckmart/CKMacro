@@ -230,95 +230,103 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 var filteredType = type.wrappedTypeName
                 let isOptional = type.looksLikeOptionalType
-                let referenceType = referenceMarker.referenceType
-                var action = ""
-                if referenceType == "referencesProperty" {
-                    action = ".none"
-                } else if referenceType == "isReferencedByProperty" {
-                    action = ".deleteSelf"
-                } else if referenceType == "data" {
-                    action = "data"
-                } else {
-                    throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
-                }
-                if referenceType == "referencesProperty" {
-                    let isOptional = filteredType != type
-                    dec = #"""
-                       /// Relationship `\#(name)`
-                       guard let \#(name)Reference = ckRecord["\#(name)"] as? CKRecord.Reference\#(isOptional ? "?" : "") else {  
-                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "CKRecord.Reference\#(isOptional ? "?" : "")", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
-                       }
-                       
-                       """#
-                    +
-                    (
-                        isOptional
-                        ? #"""
-                    if let \#(name)Reference {
-                        guard let \#(name)Database = database else {
-                           throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
-                        }
-                        var \#(name)Record: CKRecord?
-                        do {
-                            \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
-                        } catch CKError.unknownItem {
-                            \#(name)Record = nil
-                        }
-                        if let \#(name)Record {
-                            do {
-                                let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
-                                self.\#(name) = \#(name)
-                            } catch {
-                                throw CKRecordDecodingError.errorDecodingNestedField(fieldName: "\#(name)", error)
-                            }
-                        } else {
-                            self.\#(name) = nil
-                        }
-                    }
-                      
-                    """#
-                        : #"""
+                let databaseCheck = #"""
                     guard let \#(name)Database = database else {
-                        throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
+                       throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
                     }
-                    let \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
-                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
-                    self.\#(name) = \#(name)
-                    
                     """#
-                    )
-                } else if referenceType == "isReferencedByProperty" {
+                
+                if referenceMarker.referenceType == "referencesProperty" {
+                    let getReference = #"""
+                        /// Relationship `\#(name)`
+                        guard let \#(name)Reference = ckRecord["\#(name)"] as? CKRecord.Reference\#(isOptional ? "?" : "") else {  
+                            throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "CKRecord.Reference\#(isOptional ? "?" : "")", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                        }
+                        
+                        """#
+                    
+                    let fetchOptionallyReferencedProperty = #"""
+                        if let \#(name)Reference {
+                            \#(databaseCheck)
+                            var \#(name)Record: CKRecord?
+                            do {
+                                \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
+                            } catch CKError.unknownItem {
+                                \#(name)Record = nil
+                            }
+                            if let \#(name)Record {
+                                do {
+                                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
+                                    self.\#(name) = \#(name)
+                                } catch {
+                                    throw CKRecordDecodingError.errorDecodingNestedField(fieldName: "\#(name)", error)
+                                }
+                            } else {
+                                self.\#(name) = nil
+                            }
+                        }
+                          
+                        """#
+                    
+                    let fetchReferencedProperty = #"""
+                        \#(databaseCheck)
+                        let \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
+                        let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
+                        self.\#(name) = \#(name)
+                        
+                        """#
+                    
+                    dec = getReference + (isOptional
+                                          ? fetchOptionallyReferencedProperty
+                                          : fetchReferencedProperty)
+                } else if referenceMarker.referenceType == "isReferencedByProperty" {
                     dec =
                     isOptional
                     ? """
                     /// Decoding relationship `\(name)`
+                    \(databaseCheck)
                     let \(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
                     let \(name)Query = CKQuery(recordType: \(filteredType).__recordType, predicate: NSPredicate(format: "\(mainName.dropFirst().dropLast())Owner == %@", \(name)OwnerReference))
                     do {
-                        let \(name)FetchResponse = try await \(name)Database?.records(matching: \(name)Query)
-                        guard let \(name)FetchedRecords = \(name)FetchResponse?.0.compactMap({try? $0.1.get()}) else {
-                            throw CKRecordDecodingError.missingField("erro curriculum")
+                        let \(name)FetchResponse = try await \(name)Database.records(matching: \(name)Query)
+                        guard \(name)FetchResponse.0.count <= 1 else {
+                            throw CKRecordDecodingError.multipleRecordsWithSameOwner
                         }
+                        let \(name)FetchedRecords = try \(name)FetchResponse.0.compactMap({ try $0.1.get() })
                         if let record = \(name)FetchedRecords.first {
-                            \(name) = try await \(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \(name)Database)
+                            self.\(name) = try await \(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \(name)Database)
+                        } else {
+                            self.\(name) = nil
                         }
-                    } catch CKError.invalidArguments {
-                        print("invalid arguments")
-                        \(name) = nil
+                    } catch CKError.unknownItem {
+                        self.\(name) = nil
                     }
                       
                     """
-                    : #"""
+                    :
+                    #"""
                     /// Decoding relationship `\#(name)`
-                    guard let \#(name)Database = database else {
-                        throw CKRecordDecodingError.missingDatabase(fieldName: "\#(name)")
+                    \#(databaseCheck)
+                    let \#(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
+                    let \#(name)Query = CKQuery(recordType: \#(filteredType).__recordType, predicate: NSPredicate(format: "\#(mainName.dropFirst().dropLast())Owner == %@", \#(name)OwnerReference))
+                    do {
+                        let \#(name)FetchResponse = try await \#(name)Database.records(matching: \#(name)Query)
+                        guard \#(name)FetchResponse.0.count <= 1 else {
+                            throw CKRecordDecodingError.multipleRecordsWithSameOwner
+                        }
+                        let \#(name)FetchedRecords = try \#(name)FetchResponse.0.compactMap({ try $0.1.get() })
+                        if let record = \#(name)FetchedRecords.first {
+                            self.\#(name) = try await \#(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \#(name)Database)
+                        } else {
+                            throw CKRecordDecodingError.missingField("\#(name)")
+                        }
+                    } catch CKError.unknownItem {
+                        throw CKRecordDecodingError.missingField("\#(name)")
                     }
-                    let \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
-                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
-                    self.\#(name) = \#(name)
                     
                     """#
                 } else {
+                    throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
                     dec = #"""
                     /// Decoding relationship `\#(name)`
                     guard \#(name)Data = ckRecord["\#(name)"] as? Data\#(isOptional ? "?" : "") else {
@@ -408,60 +416,39 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 """#
             } else if let referenceMarker = declaration.relationshipMarker {
+                
                 let isOptional = type.looksLikeOptionalType
-                let referenceType = referenceMarker.referenceType
-                var action = ""
-                if referenceType == "referencesProperty" {
-                    action = ".none"
-                } else if referenceType == "isReferencedByProperty" {
-                    action = ".deleteSelf"
-                } else if referenceType == "data" {
-                    action = "data"
+                
+                func ifLetWrapper(content: String) -> String {
+                    """
+                    if let \(name) {
+                    \(content)
+                    }
+                    """
+                }
+                
+                if referenceMarker.referenceType == "referencesProperty" {
+                    let rela = #"""
+                            let childRecord = try \#(name).convertToCKRecord()
+                            record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: .none)
+                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                            """#
+                    enc = """
+                        /// Encoding relationship `\(name)`
+                        \(isOptional ? ifLetWrapper(content: rela) : rela)
+                        """
+                } else if referenceMarker.referenceType == "isReferencedByProperty" {
+                    let rela = #"""
+                            let childRecord = try \#(name).convertToCKRecord()
+                            childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: .deleteSelf)
+                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                            """#
+                    enc = """
+                        /// Encoding relationship `\(name)`
+                        \(isOptional ? ifLetWrapper(content: rela) : rela)
+                        """
                 } else {
                     throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
-                }
-                if referenceType == "referencesProperty" {
-                    if isOptional {
-                        enc = #"""
-                        /// Encoding relationship `\#(name)`
-                        if let \#(name) {
-                            let childRecord = try \#(name).convertToCKRecord()
-                            record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action:   \#(action))
-                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
-                        }
-                        
-                        """#
-                    } else {
-                        enc = #"""
-                        /// Encoding relationship `\#(name)`
-                        let \#(name)ChildRecord = try \#(name).convertToCKRecord()
-                        record["\#(name)"] = CKRecord.Reference(recordID: \#(name)ChildRecord.0.recordID, action: \#(action))
-                        relationshipRecords.append(contentsOf: [\#(name)ChildRecord.0] + \#(name)ChildRecord.1)
-                        
-                        """#
-                    }
-                } else if referenceType == "isReferencedByProperty" {
-                    if isOptional {
-                        enc = #"""
-                        /// Encoding relationship `\#(name)`
-                        if let \#(name) {
-                            let childRecord = try \#(name).convertToCKRecord()
-                            childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
-                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
-                        }
-                        
-                        """#
-                    } else {
-                        enc = #"""
-                        /// Encoding relationship `\#(name)`
-                        let childRecord = try \#(name).convertToCKRecord()
-                        childRecord.0["\#(mainName.dropFirst().dropLast())Owner"] = CKRecord.Reference(recordID: record.recordID, action: \#(action))
-                        relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
-                        
-                        """#
-                    }
-                    
-                } else {
                     enc = """
                     /// Encoding relationship `\(name)`
                     let encoded\(name) = try JSONEncoder().encode(\(name))

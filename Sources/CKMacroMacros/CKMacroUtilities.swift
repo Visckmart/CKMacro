@@ -91,6 +91,8 @@ extension ConvertibleToCKRecordMacro {
                 specificReason = "missing database to fetch relationship '\(fieldName)'."
             case let .errorDecodingNestedField(fieldName, error):
                 specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
+            case .multipleRecordsWithSameOwner:
+                specificReason = "multiple records with the same owner"
             }
             return "\(genericMessage) \(specificReason)"
             """#
@@ -102,6 +104,7 @@ extension ConvertibleToCKRecordMacro {
             case fieldTypeMismatch(fieldName: String, expectedType: String, foundType: String)
             case missingDatabase(fieldName: String)
             case errorDecodingNestedField(fieldName: String, _ error: Error)
+            case multipleRecordsWithSameOwner
             """
             localizedDescriptionProperty
         }

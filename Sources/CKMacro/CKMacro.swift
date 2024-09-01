@@ -17,7 +17,7 @@ public enum ReferenceType {
     case isReferencedByProperty(weakReference: Bool)
 //    case isStronglyReferencedByProperty
     public static let isReferencedByProperty = isReferencedByProperty(weakReference: true)
-    case data
+//    case data
 }
 @attached(peer)
 public macro CKReference(_ referenceType: ReferenceType) = #externalMacro(module: "CKMacroMacros", type: "RelationshipMarkerMacro")
