@@ -344,7 +344,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     self.\#(name) = \#(name)
                     
                     """#
-                } else if propertyTypeMarker.propertyType == "data" {
+                } else if propertyTypeMarker.propertyType == "codable" {
                     
                     dec = #"""
                     /// Decoding relationship `\#(name)`
@@ -468,7 +468,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
                 if propertyTypeMarker.propertyType == "rawValue" {
                     enc = #"record["\#(name)"] = self.\#(name).rawValue"#
-                } else if propertyTypeMarker.propertyType == "data" {
+                } else if propertyTypeMarker.propertyType == "codable" {
                     enc = """
                     /// Encoding relationship `\(name)`
                     let encoded\(name) = try JSONEncoder().encode(\(name))

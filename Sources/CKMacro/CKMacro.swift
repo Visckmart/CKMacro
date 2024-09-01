@@ -24,7 +24,7 @@ public macro CKReference(_ referenceType: ReferenceType) = #externalMacro(module
 
 public enum PropertyType {
     case rawValue
-    case data
+    case codable
     case nsCoding
 }
 @attached(peer)
