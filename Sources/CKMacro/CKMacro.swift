@@ -7,7 +7,7 @@ import Foundation
           named(CKRecordEncodingError), named(CKRecordDecodingError),
           named(__recordID), named(__recordZoneID), named(__recordName), named(__storedCKRecord))
 @attached(extension, conformances: SynthesizedCKRecordConvertible)
-public macro ConvertibleToCKRecord(recordType: String? = nil) = #externalMacro(module: "CKMacroMacros", type: "ConvertibleToCKRecordMacro")
+public macro ConvertibleToCKRecord(recordType: String? = nil, debug: Bool = false) = #externalMacro(module: "CKMacroMacros", type: "ConvertibleToCKRecordMacro")
 
 @attached(peer)
 public macro CKRecordName() = #externalMacro(module: "CKMacroMacros", type: "CKRecordNameMacro")

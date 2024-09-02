@@ -18,13 +18,24 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             throw diagnose(.warning("Macro has to be used in a class"), node: node)
         }
         let className = classDecl.name.trimmed.text
-//        throw diagnose(.error("\(className)"), node: node)
+        
         let recordTypeName: String
-        if let firstMacroArgument = node.arguments?.as(LabeledExprListSyntax.self)?.first {
-            guard let stringValue = firstMacroArgument.expression.as(StringLiteralExprSyntax.self) else {
-                throw diagnose(.error("Record type must be defined by a string literal"), node: declaration)
+        var debugMode = false
+        if let arguments = node.arguments?.as(LabeledExprListSyntax.self) {
+            if let firstMacroArgument = arguments.first {
+                guard let stringValue = firstMacroArgument.expression.as(StringLiteralExprSyntax.self) else {
+                    throw diagnose(.error("Record type must be defined by a string literal"), node: declaration)
+                }
+                recordTypeName = stringValue.description
+            } else {
+                recordTypeName = className
             }
-            recordTypeName = stringValue.description
+            if let debugArgument = arguments.first(where: { $0.label?.text == "debug" }) {
+                guard let debugExpression = debugArgument.expression.as(BooleanLiteralExprSyntax.self) else {
+                    throw diagnose(.error("Debug mode must be defined by a boolean literal"), node: debugArgument)
+                }
+                debugMode = debugExpression.literal.tokenKind == .keyword(.true)
+            }
         } else {
             recordTypeName = className
         }
@@ -73,7 +84,16 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         }
         
         let recordNamePropertyFull = try getRecordName()
-        let recordNameIsOptional = recordNamePropertyFull.type.looksLikeOptionalType
+        
+        if debugMode {
+            context.diagnose(Diagnostic(node: recordNamePropertyFull.bindingDeclaration,
+                                        message: MacroError.warning("Record name")))
+            for propertyDeclaration in propertyDeclarations {
+                context.diagnose(Diagnostic(node: propertyDeclaration.bindingDeclaration,
+                                            message: MacroError.warning("\(propertyDeclaration)")))
+            }
+        }
+        
         guard recordNamePropertyFull.type == "String" else {
             throw diagnose(
                 .error("Cannot set property of type '\(recordNamePropertyFull.type)' as record name; the record name has to be a 'String'"),
@@ -346,13 +366,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: stored\#(name.firstCapitalized)))")
                     }
                     guard let \#(name) = \#(type)(rawValue: rawValue\#(name.firstCapitalized)) else {
-                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: rawValue\#(name.firstCapitalized)))")
+                        throw CKRecordDecodingError.unableToDecodeRawType(fieldName: "\#(name)", enumType: "\#(type)", rawValue: rawValue\#(name.firstCapitalized))
                     }
                     self.\#(name) = \#(name)
                     
                     """#
                 } else if propertyTypeMarker.propertyType == "codable" {
-                    
                     dec = #"""
                     /// Decoding relationship `\#(name)`
                     guard let \#(name)Data = ckRecord["\#(name)"] as? Data\#(type.looksLikeOptionalType ? "?" : "") else {
@@ -362,7 +381,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     
                     """#
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
-                    
                     dec = #"""
                     /// Decoding relationship `\#(name)`
                     guard let \#(name)Data = ckRecord["\#(name)"] as? Data\#(type.looksLikeOptionalType ? "?" : "") else {
@@ -438,9 +456,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 """#
             } else if let referenceMarker = declaration.relationshipMarker {
-                
-                let isOptional = type.looksLikeOptionalType
-                
                 func ifLetWrapper(content: String) -> String {
                     """
                     if let \(name) {
@@ -450,13 +465,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
                 if referenceMarker.referenceType == "referencesProperty" {
                     let rela = #"""
-                            let childRecord = try \#(name).convertToCKRecord()
-                            record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: .none)
-                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
-                            """#
+                        let childRecord = try \#(name).convertToCKRecord()
+                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: .none)
+                        relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        """#
                     enc = """
                         /// Encoding relationship `\(name)`
-                        \(isOptional ? ifLetWrapper(content: rela) : rela)
+                        \(type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
+                        
                         """
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
                     let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast)Owner"
@@ -467,7 +483,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             """#
                     enc = """
                         /// Encoding relationship `\(name)`
-                        \(isOptional ? ifLetWrapper(content: rela) : rela)
+                        \(type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
+                        
                         """
                 } else {
                     throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
@@ -478,8 +495,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } else if propertyTypeMarker.propertyType == "codable" {
                     enc = """
                     /// Encoding relationship `\(name)`
-                    let encoded\(name) = try JSONEncoder().encode(\(name))
-                    record["\(name)"] = encoded\(name)
+                    let encoded\(name.firstCapitalized) = try JSONEncoder().encode(self.\(name))
+                    record["\(name)"] = encoded\(name.firstCapitalized)
                     
                     """
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
