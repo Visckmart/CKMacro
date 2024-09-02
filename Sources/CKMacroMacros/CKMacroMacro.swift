@@ -109,15 +109,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         let initFromCKRecord = try InitializerDeclSyntax(
             "required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws"
         ) {
-            #"print("Init from \#(raw: className)")\#n "#
             try Self.makeTypeUnwrappingFunc()
             
-            "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName\n"
+            ExprSyntax("self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName\n")
             
             decodingCodeBlock
-            if className == "Curriculum" {
-                "\nself.delayedInit = true\n"
-            }
+            
             callWillFinishDecoding
             
         }
