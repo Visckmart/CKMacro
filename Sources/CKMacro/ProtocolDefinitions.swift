@@ -40,13 +40,19 @@ public extension SynthesizedCKRecordConvertible {
 }
     
 public extension SynthesizedCKRecordConvertible {
-    static func fetch(withRecordName recordName: String, fromCKDatabase database: CKDatabase) async throws -> Self {
+    static func fetch(
+        withRecordName recordName: String,
+        fromCKDatabase database: CKDatabase
+    ) async throws -> Self {
         let fetchedRecord = try await database.record(for: CKRecord.ID(recordName: recordName))
         return try await Self(fromCKRecord: fetchedRecord, fetchingRelationshipsFrom: database)
     }
     
-    static func fetchAll(fromCKDatabase database: CKDatabase) async throws -> [Self] {
-        let query = CKQuery(recordType: Self.__recordType, predicate: NSPredicate(value: true))
+    static func fetchAll(
+        fromCKDatabase database: CKDatabase,
+        predicate: NSPredicate? = nil
+    ) async throws -> [Self] {
+        let query = CKQuery(recordType: Self.__recordType, predicate: predicate ?? NSPredicate(value: true))
         var (response, cursor) = try await database.records(matching: query)
         
         var decodedResults = [Self]()
