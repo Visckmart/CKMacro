@@ -28,7 +28,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
                 recordTypeName = stringValue.description
             } else {
-                recordTypeName = className
+                recordTypeName = "\"className\""
             }
             if let debugArgument = arguments.first(where: { $0.label?.text == "debug" }) {
                 guard let debugExpression = debugArgument.expression.as(BooleanLiteralExprSyntax.self) else {
@@ -37,7 +37,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 debugMode = debugExpression.literal.tokenKind == .keyword(.true)
             }
         } else {
-            recordTypeName = className
+            recordTypeName = "\"className\""
         }
         
         var propertyDeclarations = [PropertyDeclaration]()
