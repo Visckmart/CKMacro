@@ -1,7 +1,7 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 import Foundation
-
+@_exported import CloudKit
 @attached(member, names: named(x),
           named(init(fromCKRecord:fetchingRelationshipsFrom:)), named(convertToCKRecord), named(__recordType),
           named(CKRecordEncodingError), named(CKRecordDecodingError),
