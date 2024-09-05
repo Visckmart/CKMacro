@@ -44,7 +44,7 @@ extension ConvertibleToCKRecordMacro {
         ]
     }
     
-    static let callWillFinishDecoding = DeclSyntax(
+    static let callWillFinishDecoding = try! CodeBlockItemSyntax(validating: 
             """
             if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
                 try delegate.willFinishDecoding(ckRecord: ckRecord)
@@ -52,7 +52,7 @@ extension ConvertibleToCKRecordMacro {
             """
     )
     
-    static let callWillFinishEncoding = DeclSyntax(
+    static let callWillFinishEncoding = try! CodeBlockItemSyntax(validating: 
             """
             if let delegate = (self as Any) as? CKRecordSynthetizationDelegate {
                 try delegate.willFinishEncoding(ckRecord: record)

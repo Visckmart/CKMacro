@@ -111,7 +111,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         ) {
             try Self.makeTypeUnwrappingFunc()
             
-            ExprSyntax("self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName\n")
+            try ExprSyntax(validating: "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName")
             
             decodingCodeBlock
             
@@ -119,8 +119,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             
         }
         
-        let convertToCKRecordSetup = try CodeBlockSyntax(
-            """
+        let convertToCKRecordSetup = try CodeBlockItemListSyntax(validating: """
             guard self.__recordName.isEmpty == false else {
                 throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNamePropertyFull.identifier))
             }
@@ -138,17 +137,16 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         let methodConvertToCKRecord = try FunctionDeclSyntax(
             "func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) throws -> (CKRecord, [CKRecord])"
         ) {
-            """
-            \(convertToCKRecordSetup)
             
-            \(encodingCodeBlock)
+            convertToCKRecordSetup
             
-            \(Self.callWillFinishEncoding)
+            encodingCodeBlock
             
-            return (record, relationshipRecords)
-            """
+            Self.callWillFinishEncoding
+            
+            try StmtSyntax(validating: "return (record, relationshipRecords)")
+            
         }
-        
         let recordProperties = try Self.makeRecordProperties(
             recordNameProperty: (name: recordNamePropertyFull.identifier, type: recordNamePropertyFull.type),
             recordType: recordTypeName,
@@ -202,49 +200,50 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         ]
     }
     
-    static func makeDecodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> DeclSyntax {
-        var declsDec: [String] = []
+    
+    static func makeDecodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> CodeBlockItemListSyntax {
+        var declsDec: CodeBlockItemListSyntax = .init()
         for declaration in declarations {
             let name = declaration.identifier
             let type = declaration.type
-            let dec: String
+            let dec: CodeBlockItemListSyntax
             
             if type == "Data" {
                 dec = #"""
-                /// Decoding `\#(name)`
-                guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
-                    throw CKRecordDecodingError.missingField("\#(name)")
+                /// Decoding `\#(raw: name)`
+                guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
+                    throw CKRecordDecodingError.missingField("\#(raw: name)")
                 }
                 guard
-                    let \#(name) = raw\#(name.firstCapitalized) as? CKAsset,
-                    let \#(name)FileURL = \#(name).fileURL,
-                    let \#(name)Content = try? Data(contentsOf: \#(name)FileURL)
+                    let \#(raw: name) = raw\#(raw: name.firstCapitalized) as? CKAsset,
+                    let \#(raw: name)FileURL = \#(raw: name).fileURL,
+                    let \#(raw: name)Content = try? Data(contentsOf: \#(raw: name)FileURL)
                 else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: raw\#(name.firstCapitalized)))")
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type)", foundType: "\(unwrappedType(of: raw\#(raw: name.firstCapitalized)))")
                 }
-                self.\#(name) = \#(name)Content
+                self.\#(raw: name) = \#(raw: name)Content
                 
                 """#
             } else if type == "[Data]" {
                 dec = #"""
-                /// Decoding `\#(name)`
-                guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
-                    throw CKRecordDecodingError.missingField("\#(name)")
+                /// Decoding `\#(raw: name)`
+                guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
+                    throw CKRecordDecodingError.missingField("\#(raw: name)")
                 }
-                guard let \#(name) = raw\#(name.firstCapitalized) as? [CKAsset] else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: raw\#(name.firstCapitalized)))")
+                guard let \#(raw: name) = raw\#(raw: name.firstCapitalized) as? [CKAsset] else {
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type)", foundType: "\(unwrappedType(of: raw\#(raw: name.firstCapitalized)))")
                 }
-                var \#(name)AssetContents = [Data]()
-                for asset in \#(name) {
+                var \#(raw: name)AssetContents = [Data]()
+                for asset in \#(raw: name) {
                     guard
-                        let \#(name)FileURL = asset.fileURL,
-                        let \#(name)Content = try? Data(contentsOf: \#(name)FileURL)
+                        let \#(raw: name)FileURL = asset.fileURL,
+                        let \#(raw: name)Content = try? Data(contentsOf: \#(raw: name)FileURL)
                     else {
                         continue
                     }
-                    \#(name)AssetContents.append(\#(name)Content)
+                    \#(raw: name)AssetContents.append(\#(raw: name)Content)
                 }
-                self.\#(name) = \#(name)AssetContents
+                self.\#(raw: name) = \#(raw: name)AssetContents
                 
                 """#
             } else if let referenceMarker = declaration.relationshipMarker {
@@ -297,55 +296,55 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         
                         """#
                     
-                    dec = getReference + (isOptional
-                                          ? fetchOptionallyReferencedProperty
-                                          : fetchReferencedProperty)
+                    dec = ""//getReference + (isOptional
+                              //            ? fetchOptionallyReferencedProperty
+                                //          : fetchReferencedProperty)
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
                     let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast())Owner"
                     dec =
                     isOptional
-                    ? """
-                    /// Decoding relationship `\(name)`
-                    \(databaseCheck)
-                    let \(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
-                    let \(name)Query = CKQuery(recordType: \(filteredType).__recordType, predicate: NSPredicate(format: "\(ownedFieldName) == %@", \(name)OwnerReference))
+                    ? #"""
+                    /// Decoding relationship `\#(raw: name)`
+                    \#(raw: databaseCheck)
+                    let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
+                    let \#(raw: name)Query = CKQuery(recordType: \#(raw: filteredType).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
                     do {
-                        let \(name)FetchResponse = try await \(name)Database.records(matching: \(name)Query)
-                        guard \(name)FetchResponse.0.count <= 1 else {
+                        let \#(raw: name)FetchResponse = try await \#(raw: name)Database.records(matching: \#(raw: name)Query)
+                        guard \#(raw: name)FetchResponse.0.count <= 1 else {
                             throw CKRecordDecodingError.multipleRecordsWithSameOwner
                         }
-                        let \(name)FetchedRecords = try \(name)FetchResponse.0.compactMap({ try $0.1.get() })
-                        if let record = \(name)FetchedRecords.first {
-                            self.\(name) = try await \(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \(name)Database)
+                        let \#(raw: name)FetchedRecords = try \#(raw: name)FetchResponse.0.compactMap({ try $0.1.get() })
+                        if let record = \#(raw: name)FetchedRecords.first {
+                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \#(raw: name)Database)
                         } else {
-                            self.\(name) = nil
+                            self.\#(raw: name) = nil
                         }
                     } catch CKError.unknownItem {
-                        self.\(name) = nil
+                        self.\#(raw: name) = nil
                     } catch CKError.invalidArguments {
-                        self.\(name) = nil
+                        self.\#(raw: name) = nil
                     }
                       
-                    """
+                    """#
                     :
                     #"""
-                    /// Decoding relationship `\#(name)`
-                    \#(databaseCheck)
-                    let \#(name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
-                    let \#(name)Query = CKQuery(recordType: \#(filteredType).__recordType, predicate: NSPredicate(format: "\#(ownedFieldName) == %@", \#(name)OwnerReference))
+                    /// Decoding relationship `\#(raw: name)`
+                    \#(raw: databaseCheck)
+                    let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
+                    let \#(raw: name)Query = CKQuery(recordType: \#(raw: filteredType).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
                     do {
-                        let \#(name)FetchResponse = try await \#(name)Database.records(matching: \#(name)Query)
-                        guard \#(name)FetchResponse.0.count <= 1 else {
+                        let \#(raw: name)FetchResponse = try await \#(raw: name)Database.records(matching: \#(raw: name)Query)
+                        guard \#(raw: name)FetchResponse.0.count <= 1 else {
                             throw CKRecordDecodingError.multipleRecordsWithSameOwner
                         }
-                        let \#(name)FetchedRecords = try \#(name)FetchResponse.0.compactMap({ try $0.1.get() })
-                        if let record = \#(name)FetchedRecords.first {
-                            self.\#(name) = try await \#(filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \#(name)Database)
+                        let \#(raw: name)FetchedRecords = try \#(raw: name)FetchResponse.0.compactMap({ try $0.1.get() })
+                        if let record = \#(raw: name)FetchedRecords.first {
+                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \#(raw: name)Database)
                         } else {
-                            throw CKRecordDecodingError.missingField("\#(name)")
+                            throw CKRecordDecodingError.missingField("\#(raw: name)")
                         }
                     } catch CKError.unknownItem {
-                        throw CKRecordDecodingError.missingField("\#(name)")
+                        throw CKRecordDecodingError.missingField("\#(raw: name)")
                     }
                     
                     """#
@@ -356,48 +355,48 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 if propertyTypeMarker.propertyType == "rawValue" {
                     if type.looksLikeOptionalType {
                         dec = #"""
-                        /// Decoding `\#(name)`
-                        guard let rawValue\#(name.firstCapitalized) = ckRecord["\#(name)"] as? \#(type.wrappedTypeName).RawValue else {
-                            throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type.wrappedTypeName).RawValue", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                        /// Decoding `\#(raw: name)`
+                        guard let rawValue\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] as? \#(raw: type.wrappedTypeName).RawValue else {
+                            throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type.wrappedTypeName).RawValue", foundType: "\(unwrappedType(of: ckRecord["\#(raw: name)"]))")
                         }
-                        if let \#(name) = \#(type.wrappedTypeName)(rawValue: rawValue\#(name.firstCapitalized)) {
-                            self.\#(name) = \#(name)
+                        if let \#(raw: name) = \#(raw: type.wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) {
+                            self.\#(raw: name) = \#(raw: name)
                         }
                         
                         """#
                         
                     } else {
                         dec = #"""
-                        /// Decoding `\#(name)`
-                        guard let stored\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
-                            throw CKRecordDecodingError.missingField("\#(name)")
+                        /// Decoding `\#(raw: name)`
+                        guard let stored\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
+                            throw CKRecordDecodingError.missingField("\#(raw: name)")
                         }
-                        guard let rawValue\#(name.firstCapitalized) = stored\#(name.firstCapitalized) as? \#(type.wrappedTypeName).RawValue else {
-                            throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: stored\#(name.firstCapitalized)))")
+                        guard let rawValue\#(raw: name.firstCapitalized) = stored\#(raw: name.firstCapitalized) as? \#(raw: type.wrappedTypeName).RawValue else {
+                            throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type)", foundType: "\(unwrappedType(of: stored\#(raw: name.firstCapitalized)))")
                         }
-                        guard let \#(name) = \#(type.wrappedTypeName)(rawValue: rawValue\#(name.firstCapitalized)) else {
-                            throw CKRecordDecodingError.unableToDecodeRawType(fieldName: "\#(name)", enumType: "\#(type)", rawValue: rawValue\#(name.firstCapitalized))
+                        guard let \#(raw: name) = \#(raw: type.wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) else {
+                            throw CKRecordDecodingError.unableToDecodeRawType(fieldName: "\#(raw: name)", enumType: "\#(raw: type)", rawValue: rawValue\#(raw: name.firstCapitalized))
                         }
-                        self.\#(name) = \#(name)
+                        self.\#(raw: name) = \#(raw: name)
                         
                         """#
                     }
                 } else if propertyTypeMarker.propertyType == "codable" {
                     dec = #"""
-                    /// Decoding relationship `\#(name)`
-                    guard let \#(name)Data = ckRecord["\#(name)"] as? Data\#(type.looksLikeOptionalType ? "?" : "") else {
-                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                    /// Decoding relationship `\#(raw: name)`
+                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: type.looksLikeOptionalType ? "?" : "") else {
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type)", foundType: "\(unwrappedType(of: ckRecord["\#(raw: name)"]))")
                     }
-                    self.\#(name) = try JSONDecoder().decode(\#(type.wrappedTypeName).self, from: \#(name)Data)
+                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: type.wrappedTypeName).self, from: \#(raw: name)Data)
                     
                     """#
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
                     dec = #"""
-                    /// Decoding relationship `\#(name)`
-                    guard let \#(name)Data = ckRecord["\#(name)"] as? Data\#(type.looksLikeOptionalType ? "?" : "") else {
-                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                    /// Decoding relationship `\#(raw: name)`
+                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: type.looksLikeOptionalType ? "?" : "") else {
+                        throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type)", foundType: "\(unwrappedType(of: ckRecord["\#(raw: name)"]))")
                     }
-                    self.\#(name) = try\#(type.looksLikeOptionalType ? "?" : "") NSKeyedUnarchiver.unarchivedObject(ofClass: \#(type.wrappedTypeName).self, from: \#(name)Data)!
+                    self.\#(raw: name) = try\#(raw: type.looksLikeOptionalType ? "?" : "") NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: type.wrappedTypeName).self, from: \#(raw: name)Data)!
                     
                     """#
                 } else {
@@ -405,65 +404,65 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
             } else if type.looksLikeOptionalType {
                 dec = #"""
-                /// Decoding `\#(name)`
-                guard let \#(name) = ckRecord["\#(name)"] as? \#(type) else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: ckRecord["\#(name)"]))")
+                /// Decoding `\#(raw: name)`
+                guard let \#(raw: name) = ckRecord["\#(raw: name)"] as? \#(raw: type) else {
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type)", foundType: "\(unwrappedType(of: ckRecord["\#(raw: name)"]))")
                 }
-                self.\#(name) = \#(name)
+                self.\#(raw: name) = \#(raw: name)
                 
                 """#
             } else {
                 dec = #"""
-                /// Decoding `\#(name)`
-                guard let raw\#(name.firstCapitalized) = ckRecord["\#(name)"] else {
-                    throw CKRecordDecodingError.missingField("\#(name)")
+                /// Decoding `\#(raw: name)`
+                guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
+                    throw CKRecordDecodingError.missingField("\#(raw: name)")
                 }
-                guard let \#(name) = raw\#(name.firstCapitalized) as? \#(type) else {
-                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(name)", expectedType: "\#(type)", foundType: "\(unwrappedType(of: raw\#(name.firstCapitalized)))")
+                guard let \#(raw: name) = raw\#(raw: name.firstCapitalized) as? \#(raw: type) else {
+                    throw CKRecordDecodingError.fieldTypeMismatch(fieldName: "\#(raw: name)", expectedType: "\#(raw: type)", foundType: "\(unwrappedType(of: raw\#(raw: name.firstCapitalized)))")
                 }
-                self.\#(name) = \#(name)
+                self.\#(raw: name) = \#(raw: name)
                 
                 """#
             }
-            declsDec.append(dec)
+            declsDec.append(contentsOf: dec)
         }
         
-        return "\(raw: declsDec.joined(separator: "\n"))"
+        return declsDec
     }
     
-    static func makeEncodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> DeclSyntax {
-        var declsEnc: [String] = []
+    static func makeEncodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> CodeBlockItemListSyntax {
+        var declsEnc = CodeBlockItemListSyntax()
         for declaration in declarations {
             let name = declaration.identifier
             let type = declaration.type
-            let enc: String
+            let enc: CodeBlockItemListSyntax
             
             if type == "Data" {
                 enc = #"""
-                /// Encoding `\#(name)`
-                let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
+                /// Encoding `\#(raw: name)`
+                let \#(raw: name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
                 do {
-                    try self.\#(name).write(to: \#(name)TemporaryAssetURL)
+                    try self.\#(raw: name).write(to: \#(raw: name)TemporaryAssetURL)
                 } catch let error as NSError {
-                    debugPrint("Error creating asset for \#(name): \(error)")
+                    debugPrint("Error creating asset for \#(raw: name): \(error)")
                 }
-                record["\#(name)"] = CKAsset(fileURL: \#(name)TemporaryAssetURL)
+                record["\#(raw: name)"] = CKAsset(fileURL: \#(raw: name)TemporaryAssetURL)
                 
                 """#
             } else if type == "[Data]" {
                 enc = #"""
-                /// Encoding `\#(name)`
-                var \#(name)Assets = [CKAsset]()
-                for data in self.\#(name) {
-                    let \#(name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
+                /// Encoding `\#(raw: name)`
+                var \#(raw: name)Assets = [CKAsset]()
+                for data in self.\#(raw: name) {
+                    let \#(raw: name)TemporaryAssetURL = URL(fileURLWithPath: NSTemporaryDirectory().appending(UUID().uuidString+".data"))
                     do {
-                        try data.write(to: \#(name)TemporaryAssetURL)
-                        \#(name)Assets.append(CKAsset(fileURL: \#(name)TemporaryAssetURL))
+                        try data.write(to: \#(raw: name)TemporaryAssetURL)
+                        \#(raw: name)Assets.append(CKAsset(fileURL: \#(raw: name)TemporaryAssetURL))
                     } catch let error as NSError {
-                        debugPrint("Error creating assets for \#(name): \(error)")
+                        debugPrint("Error creating assets for \#(raw: name): \(error)")
                     }
                 }
-                record["\#(name)"] = \#(name)Assets
+                record["\#(raw: name)"] = \#(raw: name)Assets
                 
                 """#
             } else if let referenceMarker = declaration.relationshipMarker {
@@ -480,11 +479,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: .none)
                         relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                         """#
-                    enc = """
-                        /// Encoding relationship `\(name)`
-                        \(type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
+                    enc = #"""
+                        /// Encoding relationship `\#(raw: name)`
+                        \#(raw: type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
                         
-                        """
+                        """#
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
                     let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast)Owner"
                     let rela = #"""
@@ -492,40 +491,40 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             childRecord.0["\#(ownedFieldName)"] = CKRecord.Reference(recordID: record.recordID, action: .deleteSelf)
                             relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
                             """#
-                    enc = """
-                        /// Encoding relationship `\(name)`
-                        \(type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
+                    enc = #"""
+                        /// Encoding relationship `\#(raw: name)`
+                        \#(raw: type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
                         
-                        """
+                        """#
                 } else {
                     throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
                 }
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
                 if propertyTypeMarker.propertyType == "rawValue" {
-                    enc = #"record["\#(name)"] = self.\#(name)\#(type.looksLikeOptionalType ? "?" : "").rawValue"#
+                    enc = #"record["\#(raw: name)"] = self.\#(raw: name)\#(raw: type.looksLikeOptionalType ? "?" : "").rawValue"#
                 } else if propertyTypeMarker.propertyType == "codable" {
-                    enc = """
-                    /// Encoding relationship `\(name)`
-                    let encoded\(name.firstCapitalized) = try JSONEncoder().encode(self.\(name))
-                    record["\(name)"] = encoded\(name.firstCapitalized)
+                    enc = #"""
+                    /// Encoding relationship `\#(raw: name)`
+                    let encoded\#(raw: name.firstCapitalized) = try JSONEncoder().encode(self.\#(raw: name))
+                    record["\#(raw: name)"] = encoded\#(raw: name.firstCapitalized)
                     
-                    """
+                    """#
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
-                    enc = """
-                    /// Encoding relationship `\(name)`
-                    record["\(name)"] = try\(type.looksLikeOptionalType ? "?" : "") NSKeyedArchiver.archivedData(withRootObject: self.\(name), requiringSecureCoding: false)
+                    enc = #"""
+                    /// Encoding relationship `\#(raw: name)`
+                    record["\#(raw: name)"] = try\#(raw: type.looksLikeOptionalType ? "?" : "") NSKeyedArchiver.archivedData(withRootObject: self.\#(raw :name), requiringSecureCoding: false)
                     
-                    """
+                    """#
                 } else {
                     throw diagnose(.error("Unknown reference mode"), node: propertyTypeMarker.node)
                 }
             } else {
-                enc = #"record["\#(name)"] = self.\#(name)"#
+                enc = #"record["\#(raw: name)"] = self.\#(raw: name)"#
             }
-            declsEnc.append(enc)
+            declsEnc.append(contentsOf: try CodeBlockItemListSyntax(validating: enc))
         }
         
-        return "\(raw: declsEnc.joined(separator: "\n"))"
+        return try CodeBlockItemListSyntax(validating: declsEnc)
     }
 }
 
