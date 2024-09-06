@@ -7,7 +7,6 @@ import CloudKit
 
 public struct ConvertibleToCKRecordMacro: MemberMacro {
     
-    
     public static func expansion(
         of node: AttributeSyntax,
         providingMembersOf declaration: some DeclGroupSyntax,
@@ -107,14 +106,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         
         
         let initFromCKRecord = try InitializerDeclSyntax(
-            "required init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom database: CKDatabase? = nil) async throws"
+            "required init(fromCKRecord ckRecord: CKRecord, fetchingReferencesFrom database: CKDatabase? = nil) async throws"
         ) {
-//            try Self.makeTypeUnwrappingFunc()
-            
             try DeclSyntax(validating: "let recordType = \(literal: recordTypeName)")
             
             try ExprSyntax(validating: "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName")
-//                .with(\.leadingTrivia, .newlines(2))
                 .with(\.trailingTrivia, .newlines(2))
             
             decodingCodeBlock
@@ -122,7 +118,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             callWillFinishDecoding
             
         }
-        
         
         let convertToCKRecordSetup = try CodeBlockItemListSyntax(validating: """
             var record: CKRecord
@@ -139,29 +134,24 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         )
             .with(\.trailingTrivia, .newlines(2))
         
-        let relationshipsArray = try CodeBlockItemListSyntax(validating: """
-            var relationshipRecords: [CKRecord] = []
-            relationshipRecords = []
-            """
-        )
-        
-        let hasRelationship = propertyDeclarations.contains(where: { $0.relationshipMarker != nil })
+        let hasReference = propertyDeclarations.contains(where: { $0.referenceMarker != nil })
         let methodConvertToCKRecord = try FunctionDeclSyntax(
-            "func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) throws -> (CKRecord, [CKRecord])"
+            "func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) throws -> (instance: CKRecord, references: [CKRecord])"
         ) {
             convertToCKRecordSetup
             
-            if hasRelationship {
-                relationshipsArray
+            if hasReference {
+                try DeclSyntax(validating: "var referenceRecords: [CKRecord] = []")
             }
+            
             encodingCodeBlock
             
             Self.callWillFinishEncoding
             
-            if hasRelationship {
-                try StmtSyntax(validating: "return (record, relationshipRecords)")
+            if hasReference {
+                try StmtSyntax(validating: "return (instance: record, references: referenceRecords)")
             } else {
-                try StmtSyntax(validating: "return (record, [])")
+                try StmtSyntax(validating: "return (instance: record, references: [])")
             }
         }
         let recordProperties = try Self.makeRecordProperties(
@@ -218,26 +208,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
     }
     
     
-    static func missingField(fieldName: String) -> Syntax {
-        let throwExpr = try! ExprSyntax(validating: #"""
-            CKRecordDecodingError.missingField(recordType: recordType, fieldName: "\#(raw: fieldName)")
-            """#)
-        return ThrowStmtSyntax(expression: throwExpr).formatted()
-    }
-    
-    
-    static func fieldTypeMismatch(fieldName: String, expectedType: String, foundValue: String) -> Syntax {
-        let errorExpr = try! ExprSyntax(validating: #"""
-            CKRecordDecodingError.fieldTypeMismatch(
-                recordType: recordType, 
-                fieldName: "\#(raw: fieldName)", 
-                expectedTypeName: \#(literal: expectedType), 
-                foundValue: \#(raw: foundValue)
-            )
-            """#)
-        return ThrowStmtSyntax(expression: errorExpr).formatted()
-    }
-    
     static func makeDecodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> CodeBlockItemListSyntax {
         var declsDec: CodeBlockItemListSyntax = .init()
         for declaration in declarations {
@@ -283,7 +253,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 self.\#(raw: name) = \#(raw: name)AssetContents
                 
                 """#
-            } else if let referenceMarker = declaration.relationshipMarker {
+            } else if let referenceMarker = declaration.referenceMarker {
                 
                 var filteredType = type.wrappedTypeName
                 let isOptional = type.looksLikeOptionalType
@@ -295,7 +265,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 if referenceMarker.referenceType == "referencesProperty" {
                     let getReference: CodeBlockSyntax = #"""
-                        /// Relationship `\#(raw: name)`
+                        /// Reference `\#(raw: name)`
                         guard let \#(raw: name)Reference = ckRecord["\#(raw: name)"] as? CKRecord.Reference\#(raw: isOptional ? "?" : "") else {
                             \#(fieldTypeMismatch(fieldName: name, expectedType: #"CKRecord.Reference\#(isOptional ? "?" : "")"#, foundValue: #"ckRecord["\#(name)"]"#))
                         }
@@ -313,7 +283,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             }
                             if let \#(name)Record {
                                 do {
-                                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
+                                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingReferencesFrom: \#(name)Database)
                                     self.\#(name) = \#(name)
                                 } catch {
                                     throw CKRecordDecodingError.errorDecodingNestedField(recordType: \#(mainName), fieldName: "\#(name)", error)
@@ -328,7 +298,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     let fetchReferencedProperty = #"""
                         \#(databaseCheck)
                         let \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
-                        let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingRelationshipsFrom: \#(name)Database)
+                        let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingReferencesFrom: \#(name)Database)
                         self.\#(name) = \#(name)
                         
                         """#
@@ -341,7 +311,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     dec =
                     isOptional
                     ? #"""
-                    /// Decoding relationship `\#(raw: name)`
+                    /// Decoding reference `\#(raw: name)`
                     \#(raw: databaseCheck)
                     let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
                     let \#(raw: name)Query = CKQuery(recordType: \#(raw: filteredType).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
@@ -352,7 +322,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         }
                         let \#(raw: name)FetchedRecords = try \#(raw: name)FetchResponse.0.compactMap({ try $0.1.get() })
                         if let record = \#(raw: name)FetchedRecords.first {
-                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \#(raw: name)Database)
+                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingReferencesFrom: \#(raw: name)Database)
                         } else {
                             self.\#(raw: name) = nil
                         }
@@ -365,7 +335,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     """#
                     :
                     #"""
-                    /// Decoding relationship `\#(raw: name)`
+                    /// Decoding reference `\#(raw: name)`
                     \#(raw: databaseCheck)
                     let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
                     let \#(raw: name)Query = CKQuery(recordType: \#(raw: filteredType).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
@@ -376,7 +346,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         }
                         let \#(raw: name)FetchedRecords = try \#(raw: name)FetchResponse.0.compactMap({ try $0.1.get() })
                         if let record = \#(raw: name)FetchedRecords.first {
-                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingRelationshipsFrom: \#(raw: name)Database)
+                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingReferencesFrom: \#(raw: name)Database)
                         } else {
                             \#(missingField(fieldName: name))
                         }
@@ -503,7 +473,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 record["\#(raw: name)"] = \#(raw: name)Assets
                 
                 """#
-            } else if let referenceMarker = declaration.relationshipMarker {
+            } else if let referenceMarker = declaration.referenceMarker {
                 func ifLetWrapper(content: String) -> String {
                     """
                     if let \(name) {
@@ -514,11 +484,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 if referenceMarker.referenceType == "referencesProperty" {
                     let rela = #"""
                         let childRecord = try \#(name).convertToCKRecord()
-                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.0.recordID, action: .none)
-                        relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                        record["\#(name)"] = CKRecord.Reference(recordID: childRecord.instance.recordID, action: .none)
+                        referenceRecords.append(contentsOf: [childRecord.instance] + childRecord.references)
                         """#
                     enc = #"""
-                        /// Encoding relationship `\#(raw: name)`
+                        /// Encoding reference `\#(raw: name)`
                         \#(raw: type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
                         
                         """#
@@ -526,11 +496,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast)Owner"
                     let rela = #"""
                             let childRecord = try \#(name).convertToCKRecord()
-                            childRecord.0["\#(ownedFieldName)"] = CKRecord.Reference(recordID: record.recordID, action: .deleteSelf)
-                            relationshipRecords.append(contentsOf: [childRecord.0] + childRecord.1)
+                            childRecord.instance["\#(ownedFieldName)"] = CKRecord.Reference(recordID: record.recordID, action: .deleteSelf)
+                            referenceRecords.append(contentsOf: [childRecord.instance] + childRecord.references)
                             """#
                     enc = #"""
-                        /// Encoding relationship `\#(raw: name)`
+                        /// Encoding reference `\#(raw: name)`
                         \#(raw: type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
                         
                         """#

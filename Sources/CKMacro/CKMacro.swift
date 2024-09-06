@@ -5,7 +5,7 @@ import Foundation
 @_exported import CloudKit
 
 @attached(member, names: named(x),
-          named(init(fromCKRecord:fetchingRelationshipsFrom:)), named(convertToCKRecord), named(__recordType),
+          named(init(fromCKRecord:fetchingReferencesFrom:)), named(convertToCKRecord), named(__recordType),
           named(CKRecordEncodingError), named(CKRecordDecodingError),
           named(__recordID), named(__recordZoneID), named(__recordName), named(__storedCKRecord))
 @attached(extension, conformances: SynthesizedCKRecordConvertible)

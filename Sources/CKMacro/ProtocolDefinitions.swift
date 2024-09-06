@@ -14,26 +14,26 @@ public protocol CKIdentifiable {
 }
 
 public protocol SynthesizedCKRecordConvertible: CKIdentifiable {
-    init(fromCKRecord ckRecord: CKRecord, fetchingRelationshipsFrom: CKDatabase?) async throws
-    func convertToCKRecord(usingBaseCKRecord: CKRecord?) throws -> (CKRecord, [CKRecord])
+    init(fromCKRecord ckRecord: CKRecord, fetchingReferencesFrom: CKDatabase?) async throws
+    func convertToCKRecord(usingBaseCKRecord: CKRecord?) throws -> (instance: CKRecord, references: [CKRecord])
     mutating func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord: CKRecord?) async throws
     static var __recordType: String { get }
 }
 
 public extension SynthesizedCKRecordConvertible {
     func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
-        let (ckRecord, relationshipRecords) = try self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
+        let (ckRecord, referenceRecords) = try self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
             let (saveResults, _) = try await database.modifyRecords(
-                saving: [ckRecord] + relationshipRecords,
+                saving: [ckRecord] + referenceRecords,
                 deleting: [],
                 savePolicy: .allKeys,
                 atomically: true
             )
         } else {
             try await database.save(ckRecord)
-            for relationshipRecord in relationshipRecords {
-                try await database.save(relationshipRecord)
+            for referenceRecord in referenceRecords {
+                try await database.save(referenceRecord)
             }
         }
     }
@@ -55,11 +55,12 @@ func unwrappedType<T>(of value: T) -> Any.Type {
         Swift.type(of: value as Any)
     }
 }
+
 func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
     Swift.type(of: v as Any)
 }
 
-public enum CKRecordDecodingError: Error {
+public enum CKRecordDecodingError: LocalizedError {
     case missingField(recordType: String, fieldName: String)
     case fieldTypeMismatch(recordType: String, fieldName: String, expectedTypeName: String, foundValue: Any?)
     case missingDatabase(recordType: String, fieldName: String)
@@ -67,7 +68,7 @@ public enum CKRecordDecodingError: Error {
     case multipleRecordsWithSameOwner(recordType: String)
     case unableToDecodeRawType(recordType: String, fieldName: String, enumType: String, rawValue: Any)
     
-    public var localizedDescription: String? {
+    public var errorDescription: String? {
         let specificReason: String
         switch self {
         case let .missingField(_, fieldName):
@@ -112,7 +113,7 @@ public extension SynthesizedCKRecordConvertible {
         fromCKDatabase database: CKDatabase
     ) async throws -> Self {
         let fetchedRecord = try await database.record(for: CKRecord.ID(recordName: recordName))
-        return try await Self(fromCKRecord: fetchedRecord, fetchingRelationshipsFrom: database)
+        return try await Self(fromCKRecord: fetchedRecord, fetchingReferencesFrom: database)
     }
     
     static func fetchAll(
@@ -126,7 +127,7 @@ public extension SynthesizedCKRecordConvertible {
         repeat {
             let fetchedRecords = response.compactMap({ try? $0.1.get() })
             for record in fetchedRecords {
-                let newInstance = try await Self(fromCKRecord: record, fetchingRelationshipsFrom: database)
+                let newInstance = try await Self(fromCKRecord: record, fetchingReferencesFrom: database)
                 decodedResults.append(newInstance)
             }
             if let currentCursor = cursor {

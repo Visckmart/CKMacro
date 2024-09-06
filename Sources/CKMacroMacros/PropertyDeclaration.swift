@@ -21,7 +21,7 @@ struct PropertyDeclaration {
     var type: String
     
     var recordNameMarker: AttributeSyntax?
-    var relationshipMarker: (node: AttributeSyntax, referenceType: String, named: String?)?
+    var referenceMarker: (node: AttributeSyntax, referenceType: String, named: String?)?
     var propertyTypeMarker: (node: AttributeSyntax, propertyType: String)?
     
     var bindingSpecifier: TokenSyntax
@@ -93,7 +93,7 @@ struct PropertyDeclaration {
                 }
                 recordNameMarker = attribute
             } else if identifier == "CKReference" {
-                guard relationshipMarker == nil else {
+                guard referenceMarker == nil else {
                     throw diagnose(
                         .error("Duplicate @CKReference marker on property '\(identifier)'"),
                         node: attribute
@@ -118,12 +118,12 @@ struct PropertyDeclaration {
                     guard let namedExpression = namedExpression?.as(StringLiteralExprSyntax.self) else {
                         throw error("Field name must be a string literal", node: attribute)
                     }
-                    relationshipMarker = (attribute, declarationName, namedExpression.representedLiteralValue)
+                    referenceMarker = (attribute, declarationName, namedExpression.representedLiteralValue)
                 } else if
                     let firstArgument = arguments.first?.expression.as(MemberAccessExprSyntax.self),
                     let declarationName = firstArgument.declName.baseName.identifier?.name
                 {
-                    relationshipMarker = (attribute, declarationName, nil)
+                    referenceMarker = (attribute, declarationName, nil)
                 } else {
                     throw error("Unable to get reference type for @CKReference", node: attribute)
                 }
@@ -173,9 +173,9 @@ struct PropertyDeclaration {
         self.isConstant = bindingSpecifier == .keyword(.let)
         self.isAlreadyInitialized = isConstant && bindingDeclaration.initializer != nil
         
-        guard [recordNameMarker, relationshipMarker?.node, propertyTypeMarker?.node].compactMap { $0 }.count <= 1 else {
+        guard [recordNameMarker, referenceMarker?.node, propertyTypeMarker?.node].compactMap { $0 }.count <= 1 else {
             throw DiagnosticsError(diagnostics: [
-                Diagnostic(node: parentVariableDeclaration, message: MacroError.error("A property cannot be marked with multiple markers simultaneously"), highlights: [recordNameMarker, relationshipMarker?.node, propertyTypeMarker?.node].compactMap { Syntax($0) })
+                Diagnostic(node: parentVariableDeclaration, message: MacroError.error("A property cannot be marked with multiple markers simultaneously"), highlights: [recordNameMarker, referenceMarker?.node, propertyTypeMarker?.node].compactMap { Syntax($0) })
             ])
 //            throw error(
 //                "A property cannot be marked with multiple markers simultaneously",
