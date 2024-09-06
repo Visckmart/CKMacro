@@ -124,11 +124,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             try makeDecodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
             
             callWillFinishDecoding
-            
         }
         
         let initializeCKRecord = try CodeBlockItemListSyntax(validating: """
-            var record: CKRecord
+            let record: CKRecord
             if let baseRecord {
                 record = baseRecord
             } else {
@@ -137,7 +136,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
                 record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
             }
-            
             """)
             .with(\.trailingTrivia, .newlines(2))
         
@@ -215,7 +213,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             var wrappedTypeName = declaration.typeAnnotationSyntax.type.wrappedInOptional?.trimmed.description ?? type
             
             if type == "Data" {
-                dec = #"""
+                dec = ""
+                declsDec.append(#"""
                 /// Decoding `\#(raw: name)`
                 guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
                     \#(missingField(fieldName: name))
@@ -229,7 +228,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
                 self.\#(raw: name) = \#(raw: name)Content
                 
-                """#
+                """#)
             } else if type == "[Data]" {
                 dec = #"""
                 /// Decoding `\#(raw: name)`
@@ -253,58 +252,59 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 """#
             } else if let referenceMarker = declaration.referenceMarker {
-                
-                var filteredType = wrappedTypeName
-                let isOptional = declaration.typeIsOptional
                 let databaseCheck: CodeBlockSyntax  = #"""
+                    // Check if database argument is present to fetch reference 
                     guard let \#(raw: name)Database = database else {
                         throw CKRecordDecodingError.missingDatabase(recordType: \#(raw: mainName), fieldName: "\#(raw: name)")
                     }
                     """#
                 
                 if referenceMarker.referenceType == "referencesProperty" {
-                    let getReference: CodeBlockSyntax = #"""
-                        /// Reference `\#(raw: name)`
-                        guard let \#(raw: name)Reference = ckRecord["\#(raw: name)"] as? CKRecord.Reference\#(raw: isOptional ? "?" : "") else {
-                            \#(fieldTypeMismatch(fieldName: name, expectedType: #"CKRecord.Reference\#(isOptional ? "?" : "")"#, foundValue: #"ckRecord["\#(name)"]"#))
+                    dec = ""
+                    let ckReferenceType = "CKRecord.Reference" + (isOptional ? "?" : "")
+                    // Decode reference
+                    declsDec.append(#"""
+                        /// Decoding reference `\#(raw: name)`
+                        guard let \#(raw: name)Reference = ckRecord["\#(raw: name)"] as? \#(raw: ckReferenceType) else {
+                            \#(fieldTypeMismatch(fieldName: name, expectedType: ckReferenceType, foundValue: #"ckRecord["\#(name)"]"#))
                         }
-                        
-                        """#
+                        """#)
                     
-                    let fetchOptionallyReferencedProperty = #"""
-                        if let \#(name)Reference {
+                    // Fetch if reference is found
+                    let fetchOptionallyReferencedProperty: CodeBlockItemListSyntax = #"""
+                        if let \#(raw: name)Reference {
                             \#(databaseCheck)
-                            var \#(name)Record: CKRecord?
+                            var \#(raw: name)Record: CKRecord?
                             do {
-                                \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
+                                // Fetch CKRecord from reference
+                                \#(raw: name)Record = try await \#(raw: name)Database.record(for: \#(raw: name)Reference.recordID)
                             } catch CKError.unknownItem {
-                                \#(name)Record = nil
+                                \#(raw: name)Record = nil
                             }
-                            if let \#(name)Record {
+                            if let \#(raw: name)Record {
                                 do {
-                                    let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingReferencesFrom: \#(name)Database)
-                                    self.\#(name) = \#(name)
+                                    // Decode `\#(raw: wrappedTypeName)` from `CKRecord`
+                                    self.\#(raw: name) = try await \#(raw: wrappedTypeName)(fromCKRecord: \#(raw: name)Record, fetchingReferencesFrom: \#(raw: name)Database)
                                 } catch {
-                                    throw CKRecordDecodingError.errorDecodingNestedField(recordType: \#(mainName), fieldName: "\#(name)", error)
+                                    throw CKRecordDecodingError.errorDecodingNestedField(recordType: \#(raw: mainName), fieldName: "\#(raw: name)", error)
                                 }
                             } else {
-                                self.\#(name) = nil
+                                self.\#(raw: name) = nil
                             }
                         }
                           
                         """#
                     
-                    let fetchReferencedProperty = #"""
+                    // Fetch reference
+                    let fetchReferencedProperty: CodeBlockItemListSyntax = #"""
                         \#(databaseCheck)
-                        let \#(name)Record = try await \#(name)Database.record(for: \#(name)Reference.recordID)
-                        let \#(name) = try await \#(filteredType)(fromCKRecord: \#(name)Record, fetchingReferencesFrom: \#(name)Database)
-                        self.\#(name) = \#(name)
-                        
+                        let \#(raw: name)Record = try await \#(raw: name)Database.record(for: \#(raw: name)Reference.recordID)
+                        self.\#(raw: name) = try await \#(raw: wrappedTypeName)(fromCKRecord: \#(raw: name)Record, fetchingReferencesFrom: \#(raw: name)Database)
                         """#
                     
-                    dec = ""//getReference + (isOptional
-                              //            ? fetchOptionallyReferencedProperty
-                                //          : fetchReferencedProperty)
+                    declsDec.append(contentsOf: isOptional
+                                                ? fetchOptionallyReferencedProperty
+                                                : fetchReferencedProperty)
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
                     let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast())Owner"
                     dec =
@@ -313,15 +313,15 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     /// Decoding reference `\#(raw: name)`
                     \#(raw: databaseCheck)
                     let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
-                    let \#(raw: name)Query = CKQuery(recordType: \#(raw: filteredType).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
+                    let \#(raw: name)Query = CKQuery(recordType: \#(raw: wrappedTypeName).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
                     do {
                         let \#(raw: name)FetchResponse = try await \#(raw: name)Database.records(matching: \#(raw: name)Query)
-                        guard \#(raw: name)FetchResponse.0.count <= 1 else {
+                        guard \#(raw: name)FetchResponse.matchResults.count <= 1 else {
                             throw CKRecordDecodingError.multipleRecordsWithSameOwner(recordType: \#(raw: mainName))
                         }
-                        let \#(raw: name)FetchedRecords = try \#(raw: name)FetchResponse.0.compactMap({ try $0.1.get() })
+                        let \#(raw: name)FetchedRecords = try \#(raw: name)FetchResponse.matchResults.compactMap({ try $0.1.get() })
                         if let record = \#(raw: name)FetchedRecords.first {
-                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingReferencesFrom: \#(raw: name)Database)
+                            self.\#(raw: name) = try await \#(raw: wrappedTypeName)(fromCKRecord: record, fetchingReferencesFrom: \#(raw: name)Database)
                         } else {
                             self.\#(raw: name) = nil
                         }
@@ -337,7 +337,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     /// Decoding reference `\#(raw: name)`
                     \#(raw: databaseCheck)
                     let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
-                    let \#(raw: name)Query = CKQuery(recordType: \#(raw: filteredType).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
+                    let \#(raw: name)Query = CKQuery(recordType: \#(raw: wrappedTypeName).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
                     do {
                         let \#(raw: name)FetchResponse = try await \#(raw: name)Database.records(matching: \#(raw: name)Query)
                         guard \#(raw: name)FetchResponse.0.count <= 1 else {
@@ -345,7 +345,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         }
                         let \#(raw: name)FetchedRecords = try \#(raw: name)FetchResponse.0.compactMap({ try $0.1.get() })
                         if let record = \#(raw: name)FetchedRecords.first {
-                            self.\#(raw: name) = try await \#(raw: filteredType)(fromCKRecord: record, fetchingReferencesFrom: \#(raw: name)Database)
+                            self.\#(raw: name) = try await \#(raw: wrappedTypeName)(fromCKRecord: record, fetchingReferencesFrom: \#(raw: name)Database)
                         } else {
                             \#(missingField(fieldName: name))
                         }
