@@ -20,8 +20,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         
         let recordTypeName: String
         var debugMode = false
+        
+        // Process arguments
         if let arguments = node.arguments?.as(LabeledExprListSyntax.self) {
-            if let firstMacroArgument = arguments.first {
+            if let firstMacroArgument = arguments.first(where: { $0.label?.text == "recordType" }) {
                 guard let stringValue = firstMacroArgument.expression.as(StringLiteralExprSyntax.self) else {
                     throw diagnose(.error("Record type must be defined by a string literal"), node: declaration)
                 }
@@ -29,6 +31,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             } else {
                 recordTypeName = "\"\(className)\""
             }
+            
             if let debugArgument = arguments.first(where: { $0.label?.text == "debug" }) {
                 guard let debugExpression = debugArgument.expression.as(BooleanLiteralExprSyntax.self) else {
                     throw diagnose(.error("Debug mode must be defined by a boolean literal"), node: debugArgument)
@@ -39,12 +42,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             recordTypeName = "\"\(className)\""
         }
         
+        // Process property declarations
         var propertyDeclarations = [PropertyDeclaration]()
-        
         for member in declaration.memberBlock.members {
-            guard let variableDeclaration = member.decl.as(VariableDeclSyntax.self) else {
-                continue
-            }
+            guard let variableDeclaration = member.decl.as(VariableDeclSyntax.self) else { continue }
+            
             for binding in variableDeclaration.bindings {
                 let propertyDeclaration = try PropertyDeclaration(
                     parentVariableDeclaration: variableDeclaration,
@@ -55,6 +57,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
             }
         }
+        
+        let hasReference = propertyDeclarations.contains(where: { $0.referenceMarker != nil })
         
         func getRecordName() throws -> PropertyDeclaration {
             let recordNameProperties = propertyDeclarations.compactMap { propertyDeclaration in
@@ -82,10 +86,13 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             return recordNamePropertyFull.propertyDeclaration
         }
         
-        let recordNamePropertyFull = try getRecordName()
+        let recordNameProperty = try getRecordName()
         
         if debugMode {
-            context.diagnose(Diagnostic(node: recordNamePropertyFull.bindingDeclaration,
+            context.diagnose(Diagnostic(node: declaration,
+                                        message: MacroError.warning("Record type: \(recordTypeName)")))
+            
+            context.diagnose(Diagnostic(node: recordNameProperty.bindingDeclaration,
                                         message: MacroError.warning("Record name")))
             for propertyDeclaration in propertyDeclarations {
                 context.diagnose(Diagnostic(node: propertyDeclaration.bindingDeclaration,
@@ -93,93 +100,81 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             }
         }
         
-        guard recordNamePropertyFull.type == "String" else {
+        guard recordNameProperty.type == "String" else {
             throw diagnose(
-                .error("Cannot set property of type '\(recordNamePropertyFull.type)' as record name; the record name has to be a 'String'"),
-                node: recordNamePropertyFull.typeAnnotationSyntax
+                .error("Cannot set property of type '\(recordNameProperty.type)' as record name; the record name has to be a 'String'"),
+                node: recordNameProperty.typeAnnotationSyntax
             )
         }
         
-        propertyDeclarations = propertyDeclarations.filter { $0.recordNameMarker == nil }
-        let encodingCodeBlock = try makeEncodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
-        let decodingCodeBlock = try makeDecodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
-        
+        let recordProperties = try Self.makeRecordProperties(
+            recordNameProperty: recordNameProperty.identifier,
+            recordType: recordTypeName,
+            getOnly: recordNameProperty.isConstant
+        )
         
         let initFromCKRecord = try InitializerDeclSyntax(
             "required init(fromCKRecord ckRecord: CKRecord, fetchingReferencesFrom database: CKDatabase? = nil) async throws"
         ) {
             try DeclSyntax(validating: "let recordType = \(literal: recordTypeName)")
             
-            try ExprSyntax(validating: "self.\(raw: recordNamePropertyFull.identifier) = ckRecord.recordID.recordName")
+            try ExprSyntax(validating: "self.\(raw: recordNameProperty.identifier) = ckRecord.recordID.recordName")
                 .with(\.trailingTrivia, .newlines(2))
             
-            decodingCodeBlock
+            try makeDecodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
             
             callWillFinishDecoding
             
         }
         
-        let convertToCKRecordSetup = try CodeBlockItemListSyntax(validating: """
+        let initializeCKRecord = try CodeBlockItemListSyntax(validating: """
             var record: CKRecord
             if let baseRecord {
                 record = baseRecord
             } else {
                 guard self.__recordName.isEmpty == false else {
-                    throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNamePropertyFull.identifier))
+                    throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNameProperty.identifier))
                 }
                 record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
             }
             
-            """
-        )
+            """)
             .with(\.trailingTrivia, .newlines(2))
         
-        let hasReference = propertyDeclarations.contains(where: { $0.referenceMarker != nil })
-        let methodConvertToCKRecord = try FunctionDeclSyntax(
+        let convertToCKRecordMethod = try FunctionDeclSyntax(
             "func convertToCKRecord(usingBaseCKRecord baseRecord: CKRecord? = nil) throws -> (instance: CKRecord, references: [CKRecord])"
         ) {
-            convertToCKRecordSetup
+            initializeCKRecord
             
             if hasReference {
                 try DeclSyntax(validating: "var referenceRecords: [CKRecord] = []")
             }
             
-            encodingCodeBlock
+            try makeEncodingDeclarations(forDeclarations: propertyDeclarations, mainName: recordTypeName)
             
             Self.callWillFinishEncoding
             
-            if hasReference {
-                try StmtSyntax(validating: "return (instance: record, references: referenceRecords)")
-            } else {
-                try StmtSyntax(validating: "return (instance: record, references: [])")
-            }
+            let referencesExpr = try ExprSyntax(validating: hasReference ? "referenceRecords" : "[]")
+            try StmtSyntax(validating: "return (instance: record, references: \(referencesExpr))")
         }
-        let recordProperties = try Self.makeRecordProperties(
-            recordNameProperty: (name: recordNamePropertyFull.identifier, type: recordNamePropertyFull.type),
-            recordType: recordTypeName,
-            getOnly: recordNamePropertyFull.isConstant
-        )
         
-        let encodingAndDecodingDeclarations = [
+        return recordProperties + [
             DeclSyntax(initFromCKRecord),
-            DeclSyntax(methodConvertToCKRecord),
+            DeclSyntax(convertToCKRecordMethod),
         ]
-        
-//        let errorEnums = try Self.makeErrorEnums(className: className ?? "")
-        
-        return recordProperties + encodingAndDecodingDeclarations// + errorEnums
         
     }
     
-    static func makeRecordProperties(recordNameProperty: (name: String, type: String), recordType: String, getOnly: Bool) throws -> [DeclSyntax] {
+    
+    static func makeRecordProperties(recordNameProperty: String, recordType: String, getOnly: Bool) throws -> [DeclSyntax] {
         let synthesizedRecordNameProperty =
             try VariableDeclSyntax("var __recordName: String") {
                 try AccessorDeclSyntax("get") {
-                    "self.\(raw: recordNameProperty.name)"
+                    "self.\(raw: recordNameProperty)"
                 }
                 if !getOnly {
                     try AccessorDeclSyntax("set") {
-                        "self.\(raw: recordNameProperty.name) = newValue"
+                        "self.\(raw: recordNameProperty) = newValue"
                     }
                 }
             }
@@ -210,10 +205,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
     
     static func makeDecodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> CodeBlockItemListSyntax {
         var declsDec: CodeBlockItemListSyntax = .init()
-        for declaration in declarations {
+        for declaration in declarations where declaration.recordNameMarker == nil {
             let name = declaration.identifier
             let type = declaration.type
             let dec: CodeBlockItemListSyntax
+            
+            var isOptional = declaration.typeIsOptional
+            var questionMarkIfOptional = isOptional ? "?" : ""
+            var wrappedTypeName = declaration.typeAnnotationSyntax.type.wrappedInOptional?.trimmed.description ?? type
             
             if type == "Data" {
                 dec = #"""
@@ -255,8 +254,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#
             } else if let referenceMarker = declaration.referenceMarker {
                 
-                var filteredType = type.wrappedTypeName
-                let isOptional = type.looksLikeOptionalType
+                var filteredType = wrappedTypeName
+                let isOptional = declaration.typeIsOptional
                 let databaseCheck: CodeBlockSyntax  = #"""
                     guard let \#(raw: name)Database = database else {
                         throw CKRecordDecodingError.missingDatabase(recordType: \#(raw: mainName), fieldName: "\#(raw: name)")
@@ -360,14 +359,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
                 if propertyTypeMarker.propertyType == "rawValue" {
-                    if type.looksLikeOptionalType {
+                    if declaration.typeIsOptional {
                         dec = #"""
                         /// Decoding `\#(raw: name)`
-                        guard let rawValue\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] as? \#(raw: type.wrappedTypeName).RawValue else {
-                        \#(fieldTypeMismatch(fieldName: name, expectedType: type.wrappedTypeName, foundValue: #"ckRecord["\#(name)"]"#))
+                        guard let rawValue\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] as? \#(raw: wrappedTypeName).RawValue else {
+                        \#(fieldTypeMismatch(fieldName: name, expectedType: wrappedTypeName, foundValue: #"ckRecord["\#(name)"]"#))
                             
                         }
-                        if let \#(raw: name) = \#(raw: type.wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) {
+                        if let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) {
                             self.\#(raw: name) = \#(raw: name)
                         }
                         
@@ -379,10 +378,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         guard let stored\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
                             \#(missingField(fieldName: name))
                         }
-                        guard let rawValue\#(raw: name.firstCapitalized) = stored\#(raw: name.firstCapitalized) as? \#(raw: type.wrappedTypeName).RawValue else {
+                        guard let rawValue\#(raw: name.firstCapitalized) = stored\#(raw: name.firstCapitalized) as? \#(raw: wrappedTypeName).RawValue else {
                             \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"stored\#(name.firstCapitalized)"#))  
                         }
-                        guard let \#(raw: name) = \#(raw: type.wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) else {
+                        guard let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) else {
                             throw CKRecordDecodingError.unableToDecodeRawType(recordType: \#(raw: mainName), fieldName: "\#(raw: name)", enumType: "\#(raw: type)", rawValue: rawValue\#(raw: name.firstCapitalized))
                         }
                         self.\#(raw: name) = \#(raw: name)
@@ -392,25 +391,25 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } else if propertyTypeMarker.propertyType == "codable" {
                     dec = #"""
                     /// Decoding `\#(raw: name)`
-                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: type.looksLikeOptionalType ? "?" : "") else {
+                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
                         \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
                     }
-                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: type.wrappedTypeName).self, from: \#(raw: name)Data)
+                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
                     
                     """#
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
                     dec = #"""
                     /// Decoding `\#(raw: name)`
-                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: type.looksLikeOptionalType ? "?" : "") else {
+                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
                         \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
                     }
-                    self.\#(raw: name) = try\#(raw: type.looksLikeOptionalType ? "?" : "") NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: type.wrappedTypeName).self, from: \#(raw: name)Data)!
+                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
                     
                     """#
                 } else {
                     throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
                 }
-            } else if type.looksLikeOptionalType {
+            } else if isOptional {
                 dec = #"""
                 /// Decoding `\#(raw: name)`
                 guard let \#(raw: name) = ckRecord["\#(raw: name)"] as? \#(raw: type) else {
@@ -440,10 +439,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
     
     static func makeEncodingDeclarations(forDeclarations declarations: [PropertyDeclaration], mainName: String) throws -> CodeBlockItemListSyntax {
         var declsEnc = CodeBlockItemListSyntax()
-        for declaration in declarations {
+        for declaration in declarations where declaration.recordNameMarker == nil {
             let name = declaration.identifier
             let type = declaration.type
             let enc: CodeBlockItemListSyntax
+            var isOptional = declaration.typeIsOptional
+            var questionMarkIfOptional = isOptional ? "?" : ""
             var addNewLine = true
             if type == "Data" {
                 enc = #"""
@@ -489,7 +490,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         """#
                     enc = #"""
                         /// Encoding reference `\#(raw: name)`
-                        \#(raw: type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
+                        \#(raw: isOptional ? ifLetWrapper(content: rela) : rela)
                         
                         """#
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
@@ -501,7 +502,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             """#
                     enc = #"""
                         /// Encoding reference `\#(raw: name)`
-                        \#(raw: type.looksLikeOptionalType ? ifLetWrapper(content: rela) : rela)
+                        \#(raw: isOptional ? ifLetWrapper(content: rela) : rela)
                         
                         """#
                 } else {
@@ -509,7 +510,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 }
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
                 if propertyTypeMarker.propertyType == "rawValue" {
-                    enc = #"record["\#(raw: name)"] = self.\#(raw: name)\#(raw: type.looksLikeOptionalType ? "?" : "").rawValue"#
+                    enc = #"record["\#(raw: name)"] = self.\#(raw: name)\#(raw: questionMarkIfOptional).rawValue"#
                 } else if propertyTypeMarker.propertyType == "codable" {
                     enc = #"""
                     /// Encoding `\#(raw: name)`
@@ -520,7 +521,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
                     enc = #"""
                     /// Encoding `\#(raw: name)`
-                    record["\#(raw: name)"] = try\#(raw: type.looksLikeOptionalType ? "?" : "") NSKeyedArchiver.archivedData(withRootObject: self.\#(raw :name), requiringSecureCoding: false)
+                    record["\#(raw: name)"] = try\#(raw: questionMarkIfOptional) NSKeyedArchiver.archivedData(withRootObject: self.\#(raw :name), requiringSecureCoding: false)
                     
                     """#
                 } else {
@@ -552,24 +553,6 @@ extension String {
         let firstLetter = self.prefix(1).capitalized
         let remainingLetters = self.dropFirst()
         return firstLetter + remainingLetters
-    }
-}
-
-
-extension String {
-    var looksLikeOptionalType: Bool {
-        (self.hasSuffix("?") || self.hasPrefix("Optional<")) && self.count > 1
-    }
-    
-    var wrappedTypeName: String {
-        var filteredType = self
-        if filteredType.hasSuffix("?") {
-            filteredType = String(filteredType.dropLast())
-        }
-        if filteredType.hasPrefix("Optional<") {
-            filteredType = String(filteredType.dropFirst(9).dropLast())
-        }
-        return filteredType
     }
 }
 

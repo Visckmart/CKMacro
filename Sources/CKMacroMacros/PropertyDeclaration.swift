@@ -19,6 +19,7 @@ struct PropertyDeclaration {
     
     var typeAnnotationSyntax: TypeAnnotationSyntax
     var type: String
+    var typeIsOptional: Bool
     
     var recordNameMarker: AttributeSyntax?
     var referenceMarker: (node: AttributeSyntax, referenceType: String, named: String?)?
@@ -69,15 +70,18 @@ struct PropertyDeclaration {
         
         // Get type
         guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
-            var newBindingDeclaration = bindingDeclaration
-            newBindingDeclaration.typeAnnotation = TypeAnnotationSyntax(type: IdentifierTypeSyntax(name: " <#Type#> "), trailingTrivia: bindingDeclaration.trailingTrivia)
-            newBindingDeclaration.pattern = newBindingDeclaration.pattern.trimmed
+            var typedBindingDeclaration = bindingDeclaration
+                .with(\.typeAnnotation, TypeAnnotationSyntax(type: IdentifierTypeSyntax(name: " <#Type#> ")))
+                .with(\.pattern.trailingTrivia, Trivia(pieces: []))
+            
             throw diagnose(.error("Missing type annotation"), node: bindingDeclaration, fixIts: [
-                FixIt(message: MacroError.fixit("Add type annotation"), changes: [FixIt.Change.replace(oldNode: Syntax(bindingDeclaration), newNode: Syntax(newBindingDeclaration))])
+                FixIt(message: MacroError.fixit("Add type annotation"), changes: [FixIt.Change.replace(oldNode: Syntax(bindingDeclaration), newNode: Syntax(typedBindingDeclaration))])
             ])
         }
         self.typeAnnotationSyntax = typeAnnotationSyntax
         self.type = typeAnnotationSyntax.type.trimmed.description
+        self.typeIsOptional = self.typeAnnotationSyntax.type.isOptional
+        //throw error("\(typeAnnotationSyntax.debugDescription)", node: parentVariableDeclaration)
         
         // Get markers
         for attribute in parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self) } {
@@ -143,7 +147,7 @@ struct PropertyDeclaration {
                     let declarationName = firstArgument.declName.baseName.identifier?.name
                 {
                     guard declarationName != "ignored" else {
-                        let guaranteedInitialization = type.looksLikeOptionalType || bindingDeclaration.initializer != nil
+                        let guaranteedInitialization = self.typeIsOptional || bindingDeclaration.initializer != nil
                         guard guaranteedInitialization else {
                             var fixIts: [FixIt] = []
                             if let optionalFixIt = FixItTemplates.addOptional(toType: typeAnnotationSyntax) {
@@ -173,14 +177,44 @@ struct PropertyDeclaration {
         self.isConstant = bindingSpecifier == .keyword(.let)
         self.isAlreadyInitialized = isConstant && bindingDeclaration.initializer != nil
         
-        guard [recordNameMarker, referenceMarker?.node, propertyTypeMarker?.node].compactMap { $0 }.count <= 1 else {
-            throw DiagnosticsError(diagnostics: [
-                Diagnostic(node: parentVariableDeclaration, message: MacroError.error("A property cannot be marked with multiple markers simultaneously"), highlights: [recordNameMarker, referenceMarker?.node, propertyTypeMarker?.node].compactMap { Syntax($0) })
-            ])
-//            throw error(
-//                "A property cannot be marked with multiple markers simultaneously",
-//                node: parentVariableDeclaration
-//            )
+        let presentMarkers = [recordNameMarker, referenceMarker?.node, propertyTypeMarker?.node].compactMap { $0 }
+        guard presentMarkers.count <= 1 else {
+            throw DiagnosticsError(
+                diagnostics: [
+                    Diagnostic(
+                        node: parentVariableDeclaration,
+                        message: MacroError.error("A property cannot be marked with multiple markers simultaneously"),
+                        highlights: presentMarkers.compactMap(Syntax.init)
+                    )
+                ]
+            )
         }
+    }
+}
+
+
+extension TypeSyntax {
+    var isOptional: Bool {
+        if self.as(OptionalTypeSyntax.self) != nil {
+            return true
+        } else if let identifierType = self.as(IdentifierTypeSyntax.self) {
+            return identifierType.name.tokenKind == .identifier("Optional")
+        }
+        return false
+    }
+
+    var wrappedInOptional: TypeSyntax? {
+        if let optionalType = self.as(OptionalTypeSyntax.self) {
+            return optionalType.wrappedType
+        } else if let identifierType = self.as(IdentifierTypeSyntax.self) {
+            if identifierType.name.tokenKind == .identifier("Optional") {
+                if let genericArgumentClause = identifierType.genericArgumentClause,
+                    genericArgumentClause.arguments.count == 1 {
+                    
+                    return TypeSyntax(genericArgumentClause.arguments.first!.as(IdentifierTypeSyntax.self))
+                }
+            }
+        }
+        return nil
     }
 }
