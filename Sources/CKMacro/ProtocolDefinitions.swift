@@ -58,32 +58,52 @@ func unwrappedType<T>(of value: T) -> Any.Type {
 func ckRecordTypeOf<T: CKRecordValue>(of v: T) -> Any.Type {
     Swift.type(of: v as Any)
 }
+
 public enum CKRecordDecodingError: Error {
-    case missingField(String)
-    case fieldTypeMismatch(fieldName: String, expectedTypeName: String, foundValue: Any?)
-    case missingDatabase(fieldName: String)
-    case errorDecodingNestedField(fieldName: String, _ error: Error)
-    case multipleRecordsWithSameOwner
-    case unableToDecodeRawType(fieldName: String, enumType: String, rawValue: Any)
+    case missingField(recordType: String, fieldName: String)
+    case fieldTypeMismatch(recordType: String, fieldName: String, expectedTypeName: String, foundValue: Any?)
+    case missingDatabase(recordType: String, fieldName: String)
+    case errorDecodingNestedField(recordType: String, fieldName: String, _ error: Error)
+    case multipleRecordsWithSameOwner(recordType: String)
+    case unableToDecodeRawType(recordType: String, fieldName: String, enumType: String, rawValue: Any)
+    
     public var localizedDescription: String? {
-        let genericMessage = "Error while trying to initialize an instance of DataExample from a CKRecord:"
         let specificReason: String
         switch self {
-        case let .missingField(fieldName):
+        case let .missingField(_, fieldName):
             specificReason = "missing field '\(fieldName)' on CKRecord."
-        case let .fieldTypeMismatch(fieldName, expectedType, foundType):
+            
+        case let .fieldTypeMismatch(_, fieldName, expectedType, foundType):
             specificReason = "field '\(fieldName)' has type \(unwrappedType(of: foundType)) but was expected to have type \(expectedType)."
-        case let .missingDatabase(fieldName):
+            
+        case let .missingDatabase(_, fieldName):
             specificReason = "missing database to fetch relationship '\(fieldName)'."
-        case let .errorDecodingNestedField(fieldName, error):
+            
+        case let .errorDecodingNestedField(_, fieldName, error):
             specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
             
-        case .multipleRecordsWithSameOwner:
+        case let .multipleRecordsWithSameOwner(_):
             specificReason = "multiple records with the same owner"
-        case let .unableToDecodeRawType(fieldName, enumType, rawValue):
+            
+        case let .unableToDecodeRawType(_, fieldName, enumType, rawValue):
             specificReason = "field '\(fieldName)' could not be decoded since '\(enumType)' could not be instantiated from raw value \(rawValue)"
+            
         }
-        return "\(genericMessage) \(specificReason)"
+        return "Error while trying to initialize an instance of \(self.recordType) from a CKRecord: \(specificReason)"
+    }
+    
+    public var recordType: String {
+        switch self {
+        case
+            let .missingField(recordType, _),
+            let .fieldTypeMismatch(recordType, _, _, _),
+            let .missingDatabase(recordType, _),
+            let .errorDecodingNestedField(recordType, _, _),
+            let .multipleRecordsWithSameOwner(recordType),
+            let .unableToDecodeRawType(recordType, _, _, _):
+            
+            return recordType
+        }
     }
 }
 public extension SynthesizedCKRecordConvertible {
