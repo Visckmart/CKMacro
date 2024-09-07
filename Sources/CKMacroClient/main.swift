@@ -1,6 +1,12 @@
-//import CKMacro
-//
-//
+import CKMacro
+
+@ConvertibleToCKRecord
+class User {
+    @CKRecordName var id: String
+    init(id: String) {
+        self.id = id
+    }
+}
 //@ConvertibleToCKRecord(recordType: "MyAppUser")
 //class User {
 //    @CKRecordName var id: String = UUID().uuidString

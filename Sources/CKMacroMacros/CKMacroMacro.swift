@@ -1,6 +1,7 @@
 import SwiftCompilerPlugin
 import SwiftSyntax
 import SwiftSyntaxMacros
+import SwiftSyntaxBuilder
 import SwiftDiagnostics
 
 import CloudKit
@@ -109,17 +110,17 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 node: recordNameProperty.typeAnnotationSyntax
             )
         }
-        
+//        throw error(">\(recordNameProperty.identifier)<", node: node)
         let recordProperties = try Self.makeRecordProperties(
             recordNameProperty: recordNameProperty.identifier,
             recordType: recordTypeName,
             getOnly: recordNameProperty.isConstant
         )
-        
+//        throw error("\(recordProperties[0].debugDescription)", node: node)
         let initFromCKRecord = try InitializerDeclSyntax(
             "required init(fromCKRecord ckRecord: CKRecord, fetchingReferencesFrom database: CKDatabase? = nil) async throws"
         ) {
-            try DeclSyntax(validating: "let recordType = \(literal: recordTypeName)")
+            try DeclSyntax(validating: "let recordType = \(raw: recordTypeName)")
             
             try ExprSyntax(validating: "self.\(raw: recordNameProperty.identifier) = ckRecord.recordID.recordName")
                 .with(\.trailingTrivia, .newlines(2))
@@ -168,29 +169,28 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
     
     
     static func makeRecordProperties(recordNameProperty: String, recordType: String, getOnly: Bool) throws -> [DeclSyntax] {
-        let synthesizedRecordNameProperty =
-            try VariableDeclSyntax("var __recordName: String") {
-                try AccessorDeclSyntax("get") {
-                    "self.\(raw: recordNameProperty)"
+        let synthesizedRecordNameProperty: DeclSyntax = """
+            var __recordName: String {
+                get {
+                    self.\(raw: recordNameProperty)
                 }
-                if !getOnly {
-                    try AccessorDeclSyntax("set") {
-                        "self.\(raw: recordNameProperty) = newValue"
-                    }
+                set {
+                    self.\(raw: recordNameProperty) = newValue
                 }
             }
+            """
         
-        let synthesizedRecordIDProperty =
-            try VariableDeclSyntax("var __recordID: CKRecord.ID") {
-                try AccessorDeclSyntax("get") {
-                    "return CKRecord.ID(recordName: self.__recordName)"
+        let synthesizedRecordIDProperty: DeclSyntax = """
+            var __recordID: CKRecord.ID {
+                get {
+                    return CKRecord.ID(recordName: self.__recordName)
                 }
-                if !getOnly {
-                    try AccessorDeclSyntax("set") {
-                        "self.__recordName = newValue.recordName"
-                    }
+                
+                set {
+                    self.__recordName = newValue.recordName
                 }
             }
+            """
         
         let synthesizedRecordTypeProperty = try VariableDeclSyntax(
             "static let __recordType: String = \(raw: recordType)"
@@ -392,14 +392,60 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         """#
                     }
                 } else if propertyTypeMarker.propertyType == "codable" {
-                    dec = #"""
-                    /// Decoding `\#(raw: name)`
-                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
-                        \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
-                    }
-                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
                     
-                    """#
+                    
+                    
+                    func wrapInIfLet(_ name: String, if isOptional: Bool, @CodeBlockItemListBuilder bodyBuilder: () throws -> CodeBlockItemListSyntax) throws -> CodeBlockItemListSyntax {
+                        return try CodeBlockItemListSyntax {
+                            if isOptional {
+                                try IfExprSyntax("if let \(raw: name)") {
+                                    try bodyBuilder()
+                                }
+                            } else {
+                                try bodyBuilder()
+                            }
+                        }
+                    }
+                    
+                    var dec1 = try CodeBlockItemListSyntax {
+                        #"""
+                        /// Decoding `\#(raw: name)`
+                        guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
+                            \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
+                        }
+                        """#
+                        try wrapInIfLet("\(name)Data", if: isOptional) {
+                            try ExprSyntax(validating: #"""
+                            self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+                            """#)
+                        }
+                    }
+                    
+//                    var dec2: CodeBlockItemListSyntax = #"""
+//                    /// Decoding `\#(raw: name)`
+//                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
+//                        \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
+//                    }
+//                    """#
+                    
+//                    let final = try wrapInIfLet("\(name)Data", if: isOptional) {
+//                        try ExprSyntax(validating: #"""
+//                            self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+//                            """#)
+//                    }
+//                    dec2.append(contentsOf: final)
+//                    let ifLetWrapper = try IfExprSyntax("if let \(raw: name)Data") {
+//                        finalStmt
+//                    }
+//                    let final = CodeBlockItemListSyntax {
+//                        if isOptional {
+//                            ifLetWrapper
+//                        } else {
+//                            finalStmt
+//                        }
+//                    }
+//                    dec2.append(contentsOf: final)
+                    dec = dec1
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
                     let arrayElementType = declaration.typeAnnotationSyntax.type.arrayElementType
                     dec = #"""
@@ -409,14 +455,30 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                     """#
                     
-                    if let arrayElementType {
-                        dec.append(#"""
+                    if isOptional {
+                        if let arrayElementType {
+                            dec.append(#"""
+                                if let \#(raw: name)Data {
+                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
+                                }
+                                """#)
+                        } else {
+                            dec.append(#"""
+                                if let \#(raw: name)Data {
+                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
+                                }
+                                """#)
+                        }
+                    } else {
+                        if let arrayElementType {
+                            dec.append(#"""
                             self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
                             """#)
-                    } else {
-                        dec.append(#"""
+                        } else {
+                            dec.append(#"""
                         self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
                         """#)
+                        }
                     }
                 } else {
                     throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
