@@ -7,13 +7,14 @@ import SwiftDiagnostics
 import CloudKit
 
 public struct ConvertibleToCKRecordMacro: MemberMacro {
-    
+    static var debugNode = AttributeSyntax("")
     public static func expansion(
         of node: AttributeSyntax,
         providingMembersOf declaration: some DeclGroupSyntax,
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
+        debugNode = node
         guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
             throw diagnose(.warning("Macro has to be used in a class"), node: node)
         }
@@ -220,14 +221,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 declsDec.append(#"""
                 /// Decoding `\#(raw: name)`
                 guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
-                    \#(missingField(fieldName: name))
+                    \#(throwMissingField(fieldName: name))
                 }
                 guard
                     let \#(raw: name) = raw\#(raw: name.firstCapitalized) as? CKAsset,
                     let \#(raw: name)FileURL = \#(raw: name).fileURL,
                     let \#(raw: name)Content = try? Data(contentsOf: \#(raw: name)FileURL)
                 else {
-                        \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"raw\#(name.firstCapitalized)"#))
+                        \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"raw\#(name.firstCapitalized)"#))
                 }
                 self.\#(raw: name) = \#(raw: name)Content
                 
@@ -236,10 +237,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 dec = #"""
                 /// Decoding `\#(raw: name)`
                 guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
-                    throw CKRecordDecodingError.missingField(recordType: \#(raw: mainName), fieldName: "\#(raw: name)")
+                    throw CKRecordDecodingError.throwMissingField(recordType: \#(raw: mainName), fieldName: "\#(raw: name)")
                 }
                 guard let \#(raw: name) = raw\#(raw: name.firstCapitalized) as? [CKAsset] else {
-                    \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"raw\#(name.firstCapitalized)"#))
+                    \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"raw\#(name.firstCapitalized)"#))
                 }
                 var \#(raw: name)AssetContents = [Data]()
                 for asset in \#(raw: name) {
@@ -269,7 +270,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     declsDec.append(#"""
                         /// Decoding reference `\#(raw: name)`
                         guard let \#(raw: name)Reference = ckRecord["\#(raw: name)"] as? \#(raw: ckReferenceType) else {
-                            \#(fieldTypeMismatch(fieldName: name, expectedType: ckReferenceType, foundValue: #"ckRecord["\#(name)"]"#))
+                            \#(throwFieldTypeMismatch(fieldName: name, expectedType: ckReferenceType, foundValue: #"ckRecord["\#(name)"]"#))
                         }
                         """#)
                     
@@ -350,10 +351,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         if let record = \#(raw: name)FetchedRecords.first {
                             self.\#(raw: name) = try await \#(raw: wrappedTypeName)(fromCKRecord: record, fetchingReferencesFrom: \#(raw: name)Database)
                         } else {
-                            \#(missingField(fieldName: name))
+                            \#(throwMissingField(fieldName: name))
                         }
                     } catch CKError.unknownItem {
-                        \#(missingField(fieldName: name))
+                        \#(throwMissingField(fieldName: name))
                     }
                     
                     """#
@@ -366,7 +367,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         dec = #"""
                         /// Decoding `\#(raw: name)`
                         guard let rawValue\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] as? \#(raw: wrappedTypeName).RawValue else {
-                        \#(fieldTypeMismatch(fieldName: name, expectedType: wrappedTypeName, foundValue: #"ckRecord["\#(name)"]"#))
+                        \#(throwFieldTypeMismatch(fieldName: name, expectedType: wrappedTypeName, foundValue: #"ckRecord["\#(name)"]"#))
                             
                         }
                         if let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) {
@@ -379,10 +380,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         dec = #"""
                         /// Decoding `\#(raw: name)`
                         guard let stored\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
-                            \#(missingField(fieldName: name))
+                            \#(throwMissingField(fieldName: name))
                         }
                         guard let rawValue\#(raw: name.firstCapitalized) = stored\#(raw: name.firstCapitalized) as? \#(raw: wrappedTypeName).RawValue else {
-                            \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"stored\#(name.firstCapitalized)"#))  
+                            \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"stored\#(name.firstCapitalized)"#))  
                         }
                         guard let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) else {
                             throw CKRecordDecodingError.unableToDecodeRawType(recordType: \#(raw: mainName), fieldName: "\#(raw: name)", enumType: "\#(raw: type)", rawValue: rawValue\#(raw: name.firstCapitalized))
@@ -391,67 +392,73 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         
                         """#
                     }
+                    
                 } else if propertyTypeMarker.propertyType == "codable" {
                     
-                    
-                    
-                    func wrapInIfLet(_ name: String, if isOptional: Bool, @CodeBlockItemListBuilder bodyBuilder: () throws -> CodeBlockItemListSyntax) throws -> CodeBlockItemListSyntax {
-                        return try CodeBlockItemListSyntax {
-                            if isOptional {
-                                try IfExprSyntax("if let \(raw: name)") {
-                                    try bodyBuilder()
-                                }
-                            } else {
-                                try bodyBuilder()
-                            }
-                        }
-                    }
-                    
-                    var dec1 = try CodeBlockItemListSyntax {
-                        #"""
-                        /// Decoding `\#(raw: name)`
-                        guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
-                            \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
+                    func checkPresence(ofField field: String, andStoreIn variable: String) throws -> CodeBlockItemSyntax {
+                        try CodeBlockItemSyntax(validating: #"""
+                        guard let \#(raw: variable) = ckRecord["\#(raw: field)"] else {
+                            \#(throwMissingField(fieldName: field))
                         }
                         """#
-                        try wrapInIfLet("\(name)Data", if: isOptional) {
-                            try ExprSyntax(validating: #"""
-                            self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+                        )
+                    }
+                    func `guardType`(
+                        of expression: ExprSyntax,
+                        is type: String,
+                        optional isOptional: Bool = false,
+                        andStoreIn variable: String
+                    ) throws -> CodeBlockItemSyntax {
+                        try CodeBlockItemSyntax(validating: #"""
+                            guard let \#(raw: variable) = \#(raw: expression) as? \#(raw: type)\#(raw: isOptional ? "?" : "") else {
+                                \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: "\(expression.formatted())"))
+                            }
                             """#)
-                        }
                     }
                     
-//                    var dec2: CodeBlockItemListSyntax = #"""
-//                    /// Decoding `\#(raw: name)`
-//                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
-//                        \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
-//                    }
-//                    """#
                     
-//                    let final = try wrapInIfLet("\(name)Data", if: isOptional) {
-//                        try ExprSyntax(validating: #"""
-//                            self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
-//                            """#)
-//                    }
-//                    dec2.append(contentsOf: final)
-//                    let ifLetWrapper = try IfExprSyntax("if let \(raw: name)Data") {
-//                        finalStmt
-//                    }
-//                    let final = CodeBlockItemListSyntax {
-//                        if isOptional {
-//                            ifLetWrapper
-//                        } else {
-//                            finalStmt
+                    dec = try CodeBlockItemListSyntax {
+//                        docLineComment("a")
+//                        Trivia("/// Decoding a `\(name)`")
+                        if isOptional {
+//                            try checkPresence(ofField: name, andStoreIn: name)
+                            try guardType(
+                                of: #"ckRecord["\#(raw: name)"]"#, is: "Data", optional: isOptional,
+                                andStoreIn: "\(name)Data"
+                            )
+                        } else {
+                            try checkPresence(ofField: name, andStoreIn: name)
+                            try guardType(
+                                of: "\(raw: name)", is: "Data", optional: isOptional,
+                                andStoreIn: "\(name)Data"
+                            )
+                        }
+//                        #"""
+//                        guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
+//                            \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
 //                        }
-//                    }
-//                    dec2.append(contentsOf: final)
-                    dec = dec1
+//                        """#
+                        
+                        
+                        try wrapInIfLet("\(name)Data", if: isOptional) {
+                            try ExprSyntax(validating: #"""
+                                self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+                                """#)
+                        } else: {
+                            try ExprSyntax(validating: "self.\(raw: name) = nil")
+                        }
+                    }
+                    .with(\.leadingTrivia, [.docLineComment("/// Decoding a `\(name)`"), .newlines(1)])
+//                    let x = Trivia(
+//                        "/// Decoding a `\(name)`"
+//                        )
+//                    throw error("\(x.debugDescription)", node: Self.debugNode)
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
                     let arrayElementType = declaration.typeAnnotationSyntax.type.arrayElementType
                     dec = #"""
                     /// Decoding `\#(raw: name)`
                     guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
-                        \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
+                        \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
                     }
                     """#
                     
@@ -487,7 +494,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 dec = #"""
                 /// Decoding `\#(raw: name)`
                 guard let \#(raw: name) = ckRecord["\#(raw: name)"] as? \#(raw: type) else {
-                    \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
+                    \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
                 }
                 self.\#(raw: name) = \#(raw: name)
                 
@@ -496,10 +503,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 dec = #"""
                 /// Decoding `\#(raw: name)`
                 guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
-                    \#(missingField(fieldName: name))
+                    \#(throwMissingField(fieldName: name))
                 }
                 guard let \#(raw: name) = raw\#(raw: name.firstCapitalized) as? \#(raw: type) else {
-                    \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: "raw\(name.firstCapitalized)"))
+                    \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: "raw\(name.firstCapitalized)"))
                 }
                 self.\#(raw: name) = \#(raw: name)
                 
@@ -638,4 +645,19 @@ struct CKMacroPlugin: CompilerPlugin {
         CKRecordNameMacro.self,
         CKPropertyTypeMacro.self
     ]
+}
+
+
+extension CodeBlockItemSyntax {
+    func wrappedInIfLet(_ name: String, if isOptional: Bool) throws -> CodeBlockItemListSyntax {
+        return try CodeBlockItemListSyntax {
+            if isOptional {
+                try IfExprSyntax("if let \(raw: name)") {
+                    self
+                }
+            } else {
+                self
+            }
+        }
+    }
 }

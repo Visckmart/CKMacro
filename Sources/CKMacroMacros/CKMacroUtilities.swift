@@ -8,10 +8,31 @@
 import Foundation
 import SwiftSyntax
 import SwiftDiagnostics
+import SwiftSyntaxBuilder
 
 extension ConvertibleToCKRecordMacro {
     
-    static func missingField(fieldName: String) -> Syntax {
+    static func wrapInIfLet(
+        _ name: String,
+        if isOptional: Bool,
+        @CodeBlockItemListBuilder bodyBuilder: () throws -> CodeBlockItemListSyntax,
+        @CodeBlockItemListBuilder else: () throws -> CodeBlockItemListSyntax
+    ) throws -> CodeBlockItemListSyntax {
+        
+        return try CodeBlockItemListSyntax {
+            if isOptional {
+                try IfExprSyntax("if let \(raw: name)") {
+                    try bodyBuilder()
+                } else: {
+                    try `else`()
+                }
+            } else {
+                try bodyBuilder()
+            }
+        }
+    }
+    
+    static func throwMissingField(fieldName: String) -> Syntax {
         let throwExpr = try! ExprSyntax(validating: #"""
             CKRecordDecodingError.missingField(recordType: recordType, fieldName: "\#(raw: fieldName)")
             """#)
@@ -19,7 +40,7 @@ extension ConvertibleToCKRecordMacro {
     }
     
     
-    static func fieldTypeMismatch(fieldName: String, expectedType: String, foundValue: String) -> Syntax {
+    static func throwFieldTypeMismatch(fieldName: String, expectedType: String, foundValue: String) -> Syntax {
         let errorExpr = try! ExprSyntax(validating: #"""
             CKRecordDecodingError.fieldTypeMismatch(
                 recordType: recordType, 

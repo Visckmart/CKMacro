@@ -2,11 +2,31 @@ import CKMacro
 
 @ConvertibleToCKRecord
 class User {
+    
     @CKRecordName var id: String
+//    var string: String
+//    var OPTIONALString: String?
+    @CKPropertyType(.codable) var int: Int = 10
+    @CKPropertyType(.codable) var OPTIONALint: Optional<Int>
+    
     init(id: String) {
         self.id = id
+//        self.string = "a"
+        self.OPTIONALint = nil
     }
 }
+
+await Task {
+    do {
+        let u = User(id: "a")
+        let r = try u.convertToCKRecord()
+        r.0["OPTIONALint"] = nil
+        let u2 = try await User(fromCKRecord: r.0)
+        dump(u2)
+    } catch {
+        print(error)
+    }
+}.value
 //@ConvertibleToCKRecord(recordType: "MyAppUser")
 //class User {
 //    @CKRecordName var id: String = UUID().uuidString
@@ -104,3 +124,13 @@ class User {
 //        print(error.localizedDescription)
 //    }
 //}.value
+var x = 10
+
+func a () {
+guard let x = x as? Int else {
+    
+}
+guard let x = x as? Int else {
+    
+}
+}
