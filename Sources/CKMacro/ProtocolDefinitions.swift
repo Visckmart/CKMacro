@@ -39,11 +39,11 @@ public extension SynthesizedCKRecordConvertible {
     }
 }
 public enum CKRecordEncodingError: Error {
-    case emptyRecordName(fieldName: String)
+    case emptyRecordName(recordType: String, fieldName: String)
     var localizedDescription: String {
         switch self {
-        case .emptyRecordName(let fieldName):
-            return "Error when trying to encode instance of DataExample to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
+        case let .emptyRecordName(recordType, fieldName):
+            return "Error when trying to encode instance of \(recordType) to CKRecord: '\(fieldName)' is empty; the property marked with @CKRecordName cannot be empty when encoding"
         }
     }
 }
@@ -78,7 +78,7 @@ public enum CKRecordDecodingError: LocalizedError {
             specificReason = "field '\(fieldName)' has type \(unwrappedType(of: foundType)) but was expected to have type \(expectedType)."
             
         case let .missingDatabase(_, fieldName):
-            specificReason = "missing database to fetch relationship '\(fieldName)'."
+            specificReason = "missing database argument to fetch relationship '\(fieldName)'."
             
         case let .errorDecodingNestedField(_, fieldName, error):
             specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"

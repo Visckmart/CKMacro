@@ -21,8 +21,10 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         let recordTypeName: String
         var debugMode = false
         
+        
         // Process arguments
         if let arguments = node.arguments?.as(LabeledExprListSyntax.self) {
+            // Get `recordType` argument
             if let firstMacroArgument = arguments.first(where: { $0.label?.text == "recordType" }) {
                 guard let stringValue = firstMacroArgument.expression.as(StringLiteralExprSyntax.self) else {
                     throw diagnose(.error("Record type must be defined by a string literal"), node: declaration)
@@ -32,6 +34,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 recordTypeName = "\"\(className)\""
             }
             
+            // Get `debug` argument
             if let debugArgument = arguments.first(where: { $0.label?.text == "debug" }) {
                 guard let debugExpression = debugArgument.expression.as(BooleanLiteralExprSyntax.self) else {
                     throw diagnose(.error("Debug mode must be defined by a boolean literal"), node: debugArgument)
@@ -132,7 +135,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 record = baseRecord
             } else {
                 guard self.__recordName.isEmpty == false else {
-                    throw CKRecordEncodingError.emptyRecordName(fieldName: \(literal: recordNameProperty.identifier))
+                    throw CKRecordEncodingError.emptyRecordName(recordType: \(raw: recordTypeName), fieldName: \(literal: recordNameProperty.identifier))
                 }
                 record = CKRecord(recordType: \(raw: recordTypeName), recordID: __recordID)
             }
@@ -206,7 +209,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
         for declaration in declarations where declaration.recordNameMarker == nil {
             let name = declaration.identifier
             let type = declaration.type
-            let dec: CodeBlockItemListSyntax
+            var dec: CodeBlockItemListSyntax
             
             var isOptional = declaration.typeIsOptional
             var questionMarkIfOptional = isOptional ? "?" : ""
@@ -398,14 +401,23 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     
                     """#
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
+                    let arrayElementType = declaration.typeAnnotationSyntax.type.arrayElementType
                     dec = #"""
                     /// Decoding `\#(raw: name)`
                     guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
                         \#(fieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
                     }
-                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
-                    
                     """#
+                    
+                    if let arrayElementType {
+                        dec.append(#"""
+                            self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
+                            """#)
+                    } else {
+                        dec.append(#"""
+                        self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
+                        """#)
+                    }
                 } else {
                     throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
                 }

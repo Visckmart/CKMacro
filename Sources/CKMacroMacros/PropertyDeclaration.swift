@@ -81,8 +81,12 @@ struct PropertyDeclaration {
         self.typeAnnotationSyntax = typeAnnotationSyntax
         self.type = typeAnnotationSyntax.type.trimmed.description
         self.typeIsOptional = self.typeAnnotationSyntax.type.isOptional
+        
         //throw error("\(typeAnnotationSyntax.debugDescription)", node: parentVariableDeclaration)
         
+//        if identifier.name == "realColor" {
+//            throw error("\(typeAnnotationSyntax.type.arrayElementType?.description)", node: parentVariableDeclaration)
+//        }
         // Get markers
         for attribute in parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self) } {
             guard let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text else {
@@ -214,6 +218,13 @@ extension TypeSyntax {
                     return TypeSyntax(genericArgumentClause.arguments.first!.as(IdentifierTypeSyntax.self))
                 }
             }
+        }
+        return nil
+    }
+    
+    var arrayElementType: TypeSyntax? {
+        if let array = self.as(ArrayTypeSyntax.self) {
+            return array.element
         }
         return nil
     }
