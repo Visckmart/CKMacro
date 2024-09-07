@@ -66,11 +66,12 @@ await Task {
         let u = User(id: "a")
         let r = try u.convertToCKRecord()
 //        r.0["OPTIONALint"] = nil
-        print(r.0["optionalCodable"])
+//        print(r.0["optionalCodable"])
+        r.0["optionalCodable"] = try! JSONEncoder().encode("a")
         let u2 = try await User(fromCKRecord: r.0)
         dump(u2)
     } catch {
-        print(error)
+        print(error.localizedDescription)
     }
 }.value
 //@ConvertibleToCKRecord(recordType: "MyAppUser")

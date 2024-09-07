@@ -67,6 +67,7 @@ public enum CKRecordDecodingError: LocalizedError {
     case errorDecodingNestedField(recordType: String, fieldName: String, _ error: Error)
     case multipleRecordsWithSameOwner(recordType: String)
     case unableToDecodeRawType(recordType: String, fieldName: String, enumType: String, rawValue: Any)
+    case unableToDecodeDataType(recordType: String, fieldName: String, decodingType: String, error: Error)
     
     public var errorDescription: String? {
         let specificReason: String
@@ -89,6 +90,8 @@ public enum CKRecordDecodingError: LocalizedError {
         case let .unableToDecodeRawType(_, fieldName, enumType, rawValue):
             specificReason = "field '\(fieldName)' could not be decoded since '\(enumType)' could not be instantiated from raw value \(rawValue)"
             
+        case let .unableToDecodeDataType(_, fieldName, decodingType, error):
+            specificReason = "field '\(fieldName)' could not be decoded as a '\(decodingType)' because of: \(error)"
         }
         return "Error while trying to initialize an instance of \(self.recordType) from a CKRecord: \(specificReason)"
     }
@@ -101,7 +104,8 @@ public enum CKRecordDecodingError: LocalizedError {
             let .missingDatabase(recordType, _),
             let .errorDecodingNestedField(recordType, _, _),
             let .multipleRecordsWithSameOwner(recordType),
-            let .unableToDecodeRawType(recordType, _, _, _):
+            let .unableToDecodeRawType(recordType, _, _, _),
+            let .unableToDecodeDataType(recordType, _, _, _):
             
             return recordType
         }

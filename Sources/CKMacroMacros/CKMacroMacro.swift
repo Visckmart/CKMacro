@@ -412,14 +412,31 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             )
                         }
                         
-                        try wrapInIfLet("\(name)Data", if: isOptional) {
-                            try CodeBlockItemListSyntax(validating: #"""
-                                do {
-                                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
-                                } catch {
-                                    throw CKRecordDecodingError.errorDecodingNestedField(recordType: recordType, fieldName: \#(literal: name), error)
-                                }
+                        let catchClause = try CatchClauseSyntax(validating: #"""
+                            catch {
+                                throw CKRecordDecodingError.unableToDecodeDataType(recordType: recordType, fieldName: \#(literal: name), decodingType: \#(literal: propertyTypeMarker.propertyType), error: error)
+                            }
+                            """#)
+                        let a = try DoStmtSyntax(catchClauses: [catchClause]) {
+                            try ExprSyntax(validating: #"""
+                                self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
                                 """#)
+                        }
+                        
+                        try wrapInIfLet("\(name)Data", if: isOptional) {
+                            try DoStmtSyntax(catchClauses: [catchClause]) {
+                                try ExprSyntax(validating: #"""
+                                self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+                                """#)
+                            }
+//                            try CodeBlockItemListSyntax(validating: #"""
+//                                do {
+//                                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+//                                } catch {
+//                                    throw CKRecordDecodingError.unableToDecodeDataType(recordType: recordType, fieldName: \#(literal: name), decodingType: \#(literal: propertyTypeMarker.propertyType), error: error)
+//                                }
+//                                """#)
+//                            a
                         } else: {
                             try ExprSyntax(validating: "self.\(raw: name) = nil")
                         }
