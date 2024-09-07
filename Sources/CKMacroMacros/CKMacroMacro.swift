@@ -216,6 +216,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             let questionMarkIfOptional = isOptional ? "?" : ""
             let wrappedTypeName = declaration.typeAnnotationSyntax.type.wrappedInOptional?.trimmed.description ?? type
             
+            var headerComment: Trivia = [.docLineComment("/// Decoding `\(name)`"), .newlines(1)]
+            
             if type == "Data" {
                 dec = ""
                 declsDec.append(#"""
@@ -394,99 +396,105 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                     
                 } else if propertyTypeMarker.propertyType == "codable" {
-                    
-                    func checkPresence(ofField field: String, andStoreIn variable: String) throws -> CodeBlockItemSyntax {
-                        try CodeBlockItemSyntax(validating: #"""
-                        guard let \#(raw: variable) = ckRecord["\#(raw: field)"] else {
-                            \#(throwMissingField(fieldName: field))
-                        }
-                        """#
-                        )
-                    }
-                    func `guardType`(
-                        of expression: ExprSyntax,
-                        is type: String,
-                        optional isOptional: Bool = false,
-                        andStoreIn variable: String
-                    ) throws -> CodeBlockItemSyntax {
-                        try CodeBlockItemSyntax(validating: #"""
-                            guard let \#(raw: variable) = \#(raw: expression) as? \#(raw: type)\#(raw: isOptional ? "?" : "") else {
-                                \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: "\(expression.formatted())"))
-                            }
-                            """#)
-                    }
-                    
-                    
                     dec = try CodeBlockItemListSyntax {
-//                        docLineComment("a")
-//                        Trivia("/// Decoding a `\(name)`")
                         if isOptional {
-//                            try checkPresence(ofField: name, andStoreIn: name)
                             try guardType(
                                 of: #"ckRecord["\#(raw: name)"]"#, is: "Data", optional: isOptional,
-                                andStoreIn: "\(name)Data"
+                                andStoreIn: "\(name)Data",
+                                forField: name
                             )
                         } else {
-                            try checkPresence(ofField: name, andStoreIn: name)
+                            try checkPresence(ofField: name)
                             try guardType(
                                 of: "\(raw: name)", is: "Data", optional: isOptional,
-                                andStoreIn: "\(name)Data"
+                                andStoreIn: "\(name)Data",
+                                forField: name
                             )
                         }
-//                        #"""
-//                        guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
-//                            \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
-//                        }
-//                        """#
-                        
                         
                         try wrapInIfLet("\(name)Data", if: isOptional) {
-                            try ExprSyntax(validating: #"""
-                                self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+                            try CodeBlockItemListSyntax(validating: #"""
+                                do {
+                                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
+                                } catch {
+                                    throw CKRecordDecodingError.errorDecodingNestedField(recordType: recordType, fieldName: \#(literal: name), error)
+                                }
                                 """#)
                         } else: {
                             try ExprSyntax(validating: "self.\(raw: name) = nil")
                         }
                     }
-                    .with(\.leadingTrivia, [.docLineComment("/// Decoding a `\(name)`"), .newlines(1)])
-//                    let x = Trivia(
-//                        "/// Decoding a `\(name)`"
-//                        )
-//                    throw error("\(x.debugDescription)", node: Self.debugNode)
+                    //.with(\.leadingTrivia, headerComment)
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
-                    let arrayElementType = declaration.typeAnnotationSyntax.type.arrayElementType
-                    dec = #"""
-                    /// Decoding `\#(raw: name)`
-                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
-                        \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
-                    }
-                    """#
                     
-                    if isOptional {
-                        if let arrayElementType {
-                            dec.append(#"""
-                                if let \#(raw: name)Data {
-                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
-                                }
-                                """#)
+                    
+                    let arrayElementType = declaration.typeAnnotationSyntax.type.arrayElementType
+                    dec = try CodeBlockItemListSyntax {
+                        if isOptional {
+                            try guardType(
+                                of: #"ckRecord["\#(raw: name)"]"#, is: "Data", optional: isOptional,
+                                andStoreIn: "\(name)Data",
+                                forField: name
+                            )
                         } else {
-                            dec.append(#"""
-                                if let \#(raw: name)Data {
-                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
-                                }
-                                """#)
+                            try checkPresence(ofField: name)
+                            try guardType(
+                                of: "\(raw: name)", is: "Data", optional: isOptional,
+                                andStoreIn: "\(name)Data",
+                                forField: name
+                            )
                         }
-                    } else {
-                        if let arrayElementType {
-                            dec.append(#"""
-                            self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
-                            """#)
-                        } else {
-                            dec.append(#"""
-                        self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
-                        """#)
+                        
+                        
+                        try wrapInIfLet("\(name)Data", if: isOptional) {
+                            if let arrayElementType {
+                                try ExprSyntax(validating: #"""
+                                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
+                                """#)
+                            } else {
+                                try ExprSyntax(validating: #"""
+                                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
+                                """#)
+                            }
+                        } else: {
+                            try ExprSyntax(validating: "self.\(raw: name) = nil")
                         }
                     }
+                    
+                    
+                    
+//                    dec = #"""
+//                    /// Decoding `\#(raw: name)`
+//                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
+//                        \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
+//                    }
+//                    """#
+//                    
+//                    if isOptional {
+//                        if let arrayElementType {
+//                            dec.append(#"""
+//                                if let \#(raw: name)Data {
+//                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
+//                                }
+//                                """#)
+//                        } else {
+//                            dec.append(#"""
+//                                if let \#(raw: name)Data {
+//                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
+//                                }
+//                                """#)
+//                        }
+//                    } else {
+//                        if let arrayElementType {
+//                            dec.append(#"""
+//                            self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
+//                            """#)
+//                        } else {
+//                            dec.append(#"""
+//                        self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
+//                        """#)
+//                        }
+//                    }
                 } else {
                     throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
                 }
@@ -593,18 +601,38 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 if propertyTypeMarker.propertyType == "rawValue" {
                     enc = #"record["\#(raw: name)"] = self.\#(raw: name)\#(raw: questionMarkIfOptional).rawValue"#
                 } else if propertyTypeMarker.propertyType == "codable" {
-                    enc = #"""
+                    if isOptional {
+                        enc = #"""
+                    /// Encoding `\#(raw: name)`
+                    if let \#(raw: name) {
+                        let encoded\#(raw: name.firstCapitalized) = try JSONEncoder().encode(\#(raw: name))
+                        record["\#(raw: name)"] = encoded\#(raw: name.firstCapitalized)
+                    }
+                    """#
+                    } else {
+                        enc = #"""
                     /// Encoding `\#(raw: name)`
                     let encoded\#(raw: name.firstCapitalized) = try JSONEncoder().encode(self.\#(raw: name))
                     record["\#(raw: name)"] = encoded\#(raw: name.firstCapitalized)
                     
                     """#
+                        }
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
-                    enc = #"""
-                    /// Encoding `\#(raw: name)`
-                    record["\#(raw: name)"] = try\#(raw: questionMarkIfOptional) NSKeyedArchiver.archivedData(withRootObject: self.\#(raw :name), requiringSecureCoding: false)
-                    
-                    """#
+                    if isOptional {
+                        enc = #"""
+                        /// Encoding `\#(raw: name)`
+                        if let \#(raw: name) {
+                            record["\#(raw: name)"] = try\#(raw: questionMarkIfOptional) NSKeyedArchiver.archivedData(withRootObject: \#(raw :name), requiringSecureCoding: false)
+                        }
+                        
+                        """#
+                    } else {
+                        enc = #"""
+                        /// Encoding `\#(raw: name)`
+                        record["\#(raw: name)"] = try\#(raw: questionMarkIfOptional) NSKeyedArchiver.archivedData(withRootObject: self.\#(raw :name), requiringSecureCoding: false)
+                        
+                        """#
+                    }
                 } else {
                     throw diagnose(.error("Unknown reference mode"), node: propertyTypeMarker.node)
                 }

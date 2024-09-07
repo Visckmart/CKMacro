@@ -44,8 +44,8 @@ let package = Package(
         .testTarget(
             name: "CKMacroTests",
             dependencies: [
-                "CKMacroMacros",
                 "CKMacro",
+                "CKMacroMacros",
                 .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
                 .product(name: "MacroTesting", package: "swift-macro-testing")
             ]

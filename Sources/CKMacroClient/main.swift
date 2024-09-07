@@ -1,26 +1,72 @@
 import CKMacro
+import AppKit
+
 
 @ConvertibleToCKRecord
 class User {
     
     @CKRecordName var id: String
-//    var string: String
-//    var OPTIONALString: String?
-    @CKPropertyType(.codable) var int: Int = 10
-    @CKPropertyType(.codable) var OPTIONALint: Optional<Int>
     
-    init(id: String) {
+    var integer: Int
+    var double: Double
+    var string: String
+    var location: CLLocation
+    
+    var optionalInteger: Int?
+    var optionalDouble: Double?
+    var optionalString: String?
+    var optionalLocation: CLLocation?
+    
+    @CKPropertyType(.codable) var codable: Int
+    @CKPropertyType(.codable) var optionalCodable: Int?
+    @CKPropertyType(.nsCoding) var nsCoding: NSColor
+    @CKPropertyType(.nsCoding) var optionalNSCoding: NSColor?
+    
+    @CKPropertyType(.ignored) var ignored: String = "ignored"
+    static let ignoredStaticLet = 10
+    static var ignoredStaticVar = 20
+    
+    init(
+        id: String = UUID().uuidString,
+        integer: Int = 100,
+        double: Double = 200,
+        string: String = "content",
+        location: CLLocation = .init(latitude: 0, longitude: 0),
+        optionalInteger: Int? = nil,
+        optionalDouble: Double? = nil,
+        optionalString: String? = nil,
+        optionalLocation: CLLocation? = nil,
+        codable: Int = 1000,
+        optionalCodable: Int? = nil,
+        nsCoding: NSColor = .red,
+        optionalNSCoding: NSColor? = nil
+    ) {
         self.id = id
-//        self.string = "a"
-        self.OPTIONALint = nil
+        self.integer = integer
+        self.double = double
+        self.string = string
+        self.location = location
+        self.optionalInteger = optionalInteger
+        self.optionalDouble = optionalDouble
+        self.optionalString = optionalString
+        self.optionalLocation = optionalLocation
+        self.codable = codable
+        self.optionalCodable = optionalCodable
+        self.nsCoding = nsCoding
+        self.optionalNSCoding = optionalNSCoding
     }
+    
+    
+    
+    
 }
 
 await Task {
     do {
         let u = User(id: "a")
         let r = try u.convertToCKRecord()
-        r.0["OPTIONALint"] = nil
+//        r.0["OPTIONALint"] = nil
+        print(r.0["optionalCodable"])
         let u2 = try await User(fromCKRecord: r.0)
         dump(u2)
     } catch {
