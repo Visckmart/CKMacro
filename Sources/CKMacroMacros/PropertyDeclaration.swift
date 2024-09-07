@@ -35,14 +35,13 @@ struct PropertyDeclaration {
         
         // Check static
         func isModifierStatic(_ modifier: DeclModifierListSyntax.Element) -> Bool {
-            guard let modifier = modifier.as(DeclModifierSyntax.self) else { return false }
             return modifier.name.trimmed.text == "static"
         }
         let isStatic = parentVariableDeclaration.modifiers.contains(where: isModifierStatic)
         guard isStatic == false else { return nil }
         
         // Check computed
-        if let accessors = bindingDeclaration.accessorBlock?.accessors.as(CodeBlockItemListSyntax.self) {
+        if bindingDeclaration.accessorBlock?.accessors.as(CodeBlockItemListSyntax.self) != nil {
             return nil
         }
         
@@ -70,7 +69,7 @@ struct PropertyDeclaration {
         
         // Get type
         guard let typeAnnotationSyntax = bindingDeclaration.typeAnnotation else {
-            var typedBindingDeclaration = bindingDeclaration
+            let typedBindingDeclaration = bindingDeclaration
                 .with(\.typeAnnotation, TypeAnnotationSyntax(type: IdentifierTypeSyntax(name: " <#Type#> ")))
                 .with(\.pattern.trailingTrivia, Trivia(pieces: []))
             
@@ -88,7 +87,7 @@ struct PropertyDeclaration {
 //            throw error("\(typeAnnotationSyntax.type.arrayElementType?.description)", node: parentVariableDeclaration)
 //        }
         // Get markers
-        for attribute in parentVariableDeclaration.attributes.compactMap { $0.as(AttributeSyntax.self) } {
+        for attribute in parentVariableDeclaration.attributes.compactMap({ $0.as(AttributeSyntax.self) }) {
             guard let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text else {
                 continue
             }
@@ -113,7 +112,7 @@ struct PropertyDeclaration {
                 
                 
                 if let firstArgumentExpression = arguments.first?.expression.as(FunctionCallExprSyntax.self) {
-                    let relationshipInfo = firstArgumentExpression.arguments.as(LabeledExprListSyntax.self)
+                    let relationshipInfo = firstArgumentExpression.arguments
                     
                     guard
                         let declarationExpression = firstArgumentExpression.calledExpression.as(MemberAccessExprSyntax.self),
@@ -122,7 +121,7 @@ struct PropertyDeclaration {
                         throw error("Unable to get reference type for @CKReference", node: attribute)
                     }
                     
-                    let namedExpression = relationshipInfo?.first(where: {$0.label?.text == "named"})?.expression
+                    let namedExpression = relationshipInfo.first(where: {$0.label?.text == "named"})?.expression
                     guard let namedExpression = namedExpression?.as(StringLiteralExprSyntax.self) else {
                         throw error("Field name must be a string literal", node: attribute)
                     }
@@ -215,7 +214,7 @@ extension TypeSyntax {
                 if let genericArgumentClause = identifierType.genericArgumentClause,
                     genericArgumentClause.arguments.count == 1 {
                     
-                    return TypeSyntax(genericArgumentClause.arguments.first!.as(IdentifierTypeSyntax.self))
+                    return TypeSyntax(genericArgumentClause.arguments.first!)
                 }
             }
         }

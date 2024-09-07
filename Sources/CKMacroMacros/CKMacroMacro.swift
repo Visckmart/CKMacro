@@ -211,9 +211,9 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             let type = declaration.type
             var dec: CodeBlockItemListSyntax
             
-            var isOptional = declaration.typeIsOptional
-            var questionMarkIfOptional = isOptional ? "?" : ""
-            var wrappedTypeName = declaration.typeAnnotationSyntax.type.wrappedInOptional?.trimmed.description ?? type
+            let isOptional = declaration.typeIsOptional
+            let questionMarkIfOptional = isOptional ? "?" : ""
+            let wrappedTypeName = declaration.typeAnnotationSyntax.type.wrappedInOptional?.trimmed.description ?? type
             
             if type == "Data" {
                 dec = ""
@@ -455,8 +455,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             let name = declaration.identifier
             let type = declaration.type
             let enc: CodeBlockItemListSyntax
-            var isOptional = declaration.typeIsOptional
-            var questionMarkIfOptional = isOptional ? "?" : ""
+            let isOptional = declaration.typeIsOptional
+            let questionMarkIfOptional = isOptional ? "?" : ""
             var addNewLine = true
             if type == "Data" {
                 enc = #"""
@@ -506,7 +506,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         
                         """#
                 } else if referenceMarker.referenceType == "isReferencedByProperty" {
-                    let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast)Owner"
+                    let ownedFieldName = referenceMarker.named ?? "\(mainName.dropFirst().dropLast())Owner"
                     let rela = #"""
                             let childRecord = try \#(name).convertToCKRecord()
                             childRecord.instance["\#(ownedFieldName)"] = CKRecord.Reference(recordID: record.recordID, action: .deleteSelf)

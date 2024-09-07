@@ -24,7 +24,7 @@ public extension SynthesizedCKRecordConvertible {
     func saveToCKDatabase(_ database: CKDatabase, usingBaseCKRecord baseCKRecord: CKRecord? = nil) async throws {
         let (ckRecord, referenceRecords) = try self.convertToCKRecord(usingBaseCKRecord: baseCKRecord)
         if #available(macOS 12.0, *) {
-            let (saveResults, _) = try await database.modifyRecords(
+            _ = try await database.modifyRecords(
                 saving: [ckRecord] + referenceRecords,
                 deleting: [],
                 savePolicy: .allKeys,
@@ -83,7 +83,7 @@ public enum CKRecordDecodingError: LocalizedError {
         case let .errorDecodingNestedField(_, fieldName, error):
             specificReason = "field '\(fieldName)' could not be decoded because of error \(error.localizedDescription)"
             
-        case let .multipleRecordsWithSameOwner(_):
+        case .multipleRecordsWithSameOwner:
             specificReason = "multiple records with the same owner"
             
         case let .unableToDecodeRawType(_, fieldName, enumType, rawValue):
@@ -144,8 +144,8 @@ public protocol CKRecordSynthetizationDelegate: SynthesizedCKRecordConvertible {
 }
 
 public extension CKRecordSynthetizationDelegate {
-    public func willFinishEncoding(ckRecord: CKRecord) throws { }
-    public func willFinishDecoding(ckRecord: CKRecord) throws { }
+    func willFinishEncoding(ckRecord: CKRecord) throws { }
+    func willFinishDecoding(ckRecord: CKRecord) throws { }
 }
 
 
