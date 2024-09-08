@@ -2,7 +2,7 @@
 // https://docs.swift.org/swift-book
 import Foundation
 
-@_exported import CloudKit
+@_documentation(visibility: internal) @_exported import CloudKit
 
 @attached(member, names: named(x),
           named(init(fromCKRecord:fetchingReferencesFrom:)), named(convertToCKRecord), named(__recordType),
