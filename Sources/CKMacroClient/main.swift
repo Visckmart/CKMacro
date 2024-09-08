@@ -2,7 +2,7 @@ import CKMacro
 import AppKit
 
 
-@ConvertibleToCKRecord
+@ConvertibleToCKRecord(debug: false)
 class User {
     
     @CKRecordName var id: String
@@ -14,17 +14,28 @@ class User {
     
     var optionalInteger: Int?
     var optionalDouble: Double?
-    var optionalString: String?
-    var optionalLocation: CLLocation?
+    var optionalString: Optional<String>
+    var optionalLocation: Optional<CLLocation>
     
     @CKPropertyType(.codable) var codable: Int
     @CKPropertyType(.codable) var optionalCodable: Int?
+    
     @CKPropertyType(.nsCoding) var nsCoding: NSColor
     @CKPropertyType(.nsCoding) var optionalNSCoding: NSColor?
+    
+    enum Enumeration: Int {
+        case a, b
+    }
+    @CKPropertyType(.rawValue) var enumValue: Enumeration
+    @CKPropertyType(.rawValue) var optionalEnumValue: Enumeration?
     
     @CKPropertyType(.ignored) var ignored: String = "ignored"
     static let ignoredStaticLet = 10
     static var ignoredStaticVar = 20
+    
+    class var ignoredClassGetVar: Int { 10 }
+    class var ignoredClassGetSetVar: Int { get { 10 } set { } }
+    var getSetVar: Int { get { 10 } set { } }
     
     init(
         id: String = UUID().uuidString,
@@ -54,6 +65,7 @@ class User {
         self.optionalCodable = optionalCodable
         self.nsCoding = nsCoding
         self.optionalNSCoding = optionalNSCoding
+        self.enumValue = .a
     }
     
     
@@ -64,10 +76,12 @@ class User {
 await Task {
     do {
         let u = User(id: "a")
+//        u.optionalEnumValue = .a
         let r = try u.convertToCKRecord()
 //        r.0["OPTIONALint"] = nil
 //        print(r.0["optionalCodable"])
-        r.0["optionalCodable"] = try! JSONEncoder().encode("a")
+//        r.0["optionalCodable"] = try! JSONEncoder().encode("a")
+        r.0["optionalString"] = nil
         let u2 = try await User(fromCKRecord: r.0)
         dump(u2)
     } catch {
@@ -171,13 +185,24 @@ await Task {
 //        print(error.localizedDescription)
 //    }
 //}.value
-var x = 10
+//var x = 10
+//
+//func a () {
+//guard let x = x as? Int else {
+//    
+//}
+//guard let x = x as? Int else {
+//    
+//}
+//}
 
-func a () {
-guard let x = x as? Int else {
-    
-}
-guard let x = x as? Int else {
-    
-}
-}
+
+//class A {
+//    class var x: Int { get { 10 } set { }}
+//}
+//class B: A {
+//    override var x: Int
+//    init(x: Int) {
+//        self.x = x
+//    }
+//}

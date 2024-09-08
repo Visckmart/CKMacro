@@ -24,7 +24,7 @@ extension ConvertibleToCKRecordMacro {
     static func guardType(
         of expression: ExprSyntax,
         is type: String,
-        optional isOptional: Bool = false,
+        optional isOptional: Bool,
         andStoreIn variable: String,
         forField fieldName: String
     ) throws -> CodeBlockItemSyntax {

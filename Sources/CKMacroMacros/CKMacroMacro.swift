@@ -213,9 +213,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             var dec: CodeBlockItemListSyntax
             
             let isOptional = declaration.typeIsOptional
-            let questionMarkIfOptional = isOptional ? "?" : ""
+            //let questionMarkIfOptional = isOptional ? "?" : ""
             let wrappedTypeName = declaration.typeAnnotationSyntax.type.wrappedInOptional?.trimmed.description ?? type
-            
+//            if name == "optionalString" {
+//                throw error("\(declaration.typeAnnotationSyntax.type.wrappedInOptional)", node: debugNode)
+//            }
             var headerComment: Trivia = [.docLineComment("/// Decoding `\(name)`"), .newlines(1)]
             
             if type == "Data" {
@@ -366,43 +368,55 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
                 let dataDecodingErrorCatch = try CatchClauseSyntax(validating: #"""
                     catch {
-                        throw CKRecordDecodingError.unableToDecodeDataType(recordType: recordType, fieldName: \#(literal: name), decodingType: \#(literal: propertyTypeMarker.propertyType), error: error)
+                        throw CKRecordDecodingError.unableToDecodeDataType(
+                            recordType: recordType, 
+                            fieldName: \#(literal: name), 
+                            decodingType: \#(literal: propertyTypeMarker.propertyType), 
+                            error: error
+                        )
                     }
                     """#)
                 
                 if propertyTypeMarker.propertyType == "rawValue" {
-                    if declaration.typeIsOptional {
-                        dec = #"""
-                        /// Decoding `\#(raw: name)`
-                        guard let rawValue\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] as? \#(raw: wrappedTypeName).RawValue else {
-                        \#(throwFieldTypeMismatch(fieldName: name, expectedType: wrappedTypeName, foundValue: #"ckRecord["\#(name)"]"#))
-                            
-                        }
-                        if let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) {
-                            self.\#(raw: name) = \#(raw: name)
-                        }
-                        
-                        """#
-                        
-                    } else {
-                        dec = #"""
-                        /// Decoding `\#(raw: name)`
-                        guard let stored\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
-                            \#(throwMissingField(fieldName: name))
-                        }
-                        guard let rawValue\#(raw: name.firstCapitalized) = stored\#(raw: name.firstCapitalized) as? \#(raw: wrappedTypeName).RawValue else {
-                            \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"stored\#(name.firstCapitalized)"#))  
-                        }
-                        guard let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: rawValue\#(raw: name.firstCapitalized)) else {
-                            throw CKRecordDecodingError.unableToDecodeRawType(recordType: \#(raw: mainName), fieldName: "\#(raw: name)", enumType: "\#(raw: type)", rawValue: rawValue\#(raw: name.firstCapitalized))
-                        }
-                        self.\#(raw: name) = \#(raw: name)
-                        
-                        """#
-                    }
+                    let rawValueVarName = "rawValue\(name.firstCapitalized)"
                     
+                    dec = try CodeBlockItemListSyntax {
+                        if !isOptional {
+                            try checkPresence(ofField: name, andStoreIn: name)
+                        }
+                        try guardType(
+                            of: isOptional ? #"ckRecord["\#(raw: name)"]"# : "\(raw: name)",
+                            is: "\(wrappedTypeName).RawValue", optional: isOptional,
+                            andStoreIn: rawValueVarName,
+                            forField: name
+                        )
+                        
+                        if isOptional {
+                            try CodeBlockItemListSyntax(validating: #"""
+                                if let \#(raw: rawValueVarName),
+                                   let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: \#(raw: rawValueVarName)) {
+                                    self.\#(raw: name) = \#(raw: name)
+                                }
+                                """#)
+                        } else {
+                            try CodeBlockItemListSyntax(validating: #"""
+                                guard let \#(raw: name) = \#(raw: wrappedTypeName)(rawValue: \#(raw: rawValueVarName)) else {
+                                    throw CKRecordDecodingError.unableToDecodeRawType(
+                                        recordType: \#(raw: mainName), 
+                                        fieldName: "\#(raw: name)", 
+                                        enumType: "\#(raw: type)", 
+                                        rawValue: \#(raw: rawValueVarName)
+                                    )
+                                }
+                                self.\#(raw: name) = \#(raw: name)
+                                """#)
+                        }
+                        
+                        
+                    }
                 } else if propertyTypeMarker.propertyType == "codable" {
                     let dataVarName = "\(name)Data"
+                    
                     dec = try CodeBlockItemListSyntax {
                         if isOptional {
                             try guardType(
@@ -464,7 +478,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         try wrapInIfLet(dataVarName, if: isOptional) {
                             try DoStmtSyntax(catchClauses: [dataDecodingErrorCatch]) {
                                 try ExprSyntax(validating: #"""
-                                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) \#(unarchiveCall)
+                                    self.\#(raw: name) = try \#(unarchiveCall)
                                 """#)
                             }
                         } else: {
@@ -475,34 +489,20 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
                 }
             } else if isOptional {
-                dec = #"""
-                /// Decoding `\#(raw: name)`
-                guard let \#(raw: name) = ckRecord["\#(raw: name)"] as? \#(raw: type) else {
-                    \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
-                }
-                self.\#(raw: name) = \#(raw: name)
-                
-                """#
-            } else {
                 dec = try CodeBlockItemListSyntax {
-                    try checkPresence(ofField: name)
-                    try guardType(of: #"ckRecord["\#(raw: name)"]"#, is: type, andStoreIn: name, forField: name)
+                    try guardType(of: #"ckRecord["\#(raw: name)"]"#, is: wrappedTypeName, optional: isOptional, andStoreIn: name, forField: name)
                     try ExprSyntax(validating: #"""
                         self.\#(raw: name) = \#(raw: name)
                         """#)
                 }
-                
-                dec = #"""
-                /// Decoding `\#(raw: name)`
-                guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
-                    \#(throwMissingField(fieldName: name))
+            } else {
+                dec = try CodeBlockItemListSyntax {
+                    try checkPresence(ofField: name)
+                    try guardType(of: #"\#(raw: name)"#, is: type, optional: false, andStoreIn: name, forField: name)
+                    try ExprSyntax(validating: #"""
+                        self.\#(raw: name) = \#(raw: name)
+                        """#)
                 }
-                guard let \#(raw: name) = raw\#(raw: name.firstCapitalized) as? \#(raw: type) else {
-                    \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: "raw\(name.firstCapitalized)"))
-                }
-                self.\#(raw: name) = \#(raw: name)
-                
-                """#
             }
             declsDec.append(contentsOf: dec.with(\.trailingTrivia, .newlines(2)))
         }
