@@ -55,7 +55,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
             for binding in variableDeclaration.bindings {
                 let propertyDeclaration = try PropertyDeclaration(
                     parentVariableDeclaration: variableDeclaration,
-                    bindingDeclaration: binding
+                    bindingDeclaration: binding,
+                    debug: debugMode, in: context
                 )
                 if let propertyDeclaration {
                     propertyDeclarations.append(propertyDeclaration)

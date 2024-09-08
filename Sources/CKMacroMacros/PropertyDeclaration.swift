@@ -8,6 +8,7 @@
 import Foundation
 import SwiftSyntax
 import SwiftDiagnostics
+import SwiftSyntaxMacros
 
 struct PropertyDeclaration {
     
@@ -29,7 +30,7 @@ struct PropertyDeclaration {
     var isConstant: Bool
     var isAlreadyInitialized: Bool
     
-    init?(parentVariableDeclaration: VariableDeclSyntax, bindingDeclaration: PatternBindingSyntax) throws {
+    init?(parentVariableDeclaration: VariableDeclSyntax, bindingDeclaration: PatternBindingSyntax, debug: Bool, in context: some MacroExpansionContext) throws {
         self.parentVariableDeclaration = parentVariableDeclaration
         self.bindingDeclaration = bindingDeclaration
         
@@ -38,10 +39,20 @@ struct PropertyDeclaration {
             return modifier.name.trimmed.text == "static"
         }
         let isStatic = parentVariableDeclaration.modifiers.contains(where: isModifierStatic)
-        guard isStatic == false else { return nil }
+        guard isStatic == false else {
+            if debug {
+                context.diagnose(Diagnostic(node: parentVariableDeclaration,
+                                            message: MacroError.warning("Ignored because it's a static property")))
+            }
+            return nil
+        }
         
         // Check computed
         if bindingDeclaration.accessorBlock?.accessors.as(CodeBlockItemListSyntax.self) != nil {
+            if debug {
+                context.diagnose(Diagnostic(node: parentVariableDeclaration,
+                                            message: MacroError.warning("Ignored because it's a computed property")))
+            }
             return nil
         }
         
@@ -53,7 +64,13 @@ struct PropertyDeclaration {
             let isComputed = accessors.contains(where: hasGetOrSetSpecifier)
             
             
-            guard isComputed == false else { return nil }
+            guard isComputed == false else {
+                if debug {
+                    context.diagnose(Diagnostic(node: parentVariableDeclaration,
+                                                message: MacroError.warning("Ignored because it's a computed property")))
+                }
+                return nil
+            }
         }
         
         // Get identifier
@@ -61,6 +78,10 @@ struct PropertyDeclaration {
             let identifierSyntax = bindingDeclaration.pattern.as(IdentifierPatternSyntax.self)?.identifier,
             let identifier = identifierSyntax.identifier
         else {
+            if debug {
+                context.diagnose(Diagnostic(node: parentVariableDeclaration,
+                                            message: MacroError.warning("Ignored because macro was unable to get the name of the property")))
+            }
             return nil
         }
         self.identifierSyntax = identifierSyntax
@@ -165,7 +186,10 @@ struct PropertyDeclaration {
                                 fixIts: fixIts
                             )
                         }
-                        
+                        if debug {
+                            context.diagnose(Diagnostic(node: parentVariableDeclaration,
+                                                        message: MacroError.warning("Ignored because it's marked with  @CKPropertyType(.ignored)")))
+                        }
                         return nil
                     }
                     propertyTypeMarker = (attribute, declarationName)
@@ -214,7 +238,7 @@ extension TypeSyntax {
                 if let genericArgumentClause = identifierType.genericArgumentClause,
                     genericArgumentClause.arguments.count == 1 {
                     
-                    return TypeSyntax(genericArgumentClause.arguments.first!)
+                    return TypeSyntax(genericArgumentClause.arguments.first!.argument)
                 }
             }
         }
