@@ -219,12 +219,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
 //            if name == "optionalString" {
 //                throw error("\(declaration.typeAnnotationSyntax.type.wrappedInOptional)", node: debugNode)
 //            }
-            var headerComment: Trivia = [.docLineComment("/// Decoding `\(name)`"), .newlines(1)]
+            var headerComment: String = "Decoding `\(name)`"
             
             if type == "Data" {
                 dec = ""
                 declsDec.append(#"""
-                /// Decoding `\#(raw: name)`
                 guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
                     \#(throwMissingField(fieldName: name))
                 }
@@ -240,7 +239,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 """#)
             } else if type == "[Data]" {
                 dec = #"""
-                /// Decoding `\#(raw: name)`
                 guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
                     throw CKRecordDecodingError.throwMissingField(recordType: \#(raw: mainName), fieldName: "\#(raw: name)")
                 }
@@ -268,12 +266,13 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                     """#
                 
+                headerComment = #"/// Decoding reference `\#(name)`"#
                 if referenceMarker.referenceType == "referencesProperty" {
                     dec = ""
+                    
                     let ckReferenceType = "CKRecord.Reference" + (isOptional ? "?" : "")
                     // Decode reference
                     declsDec.append(#"""
-                        /// Decoding reference `\#(raw: name)`
                         guard let \#(raw: name)Reference = ckRecord["\#(raw: name)"] as? \#(raw: ckReferenceType) else {
                             \#(throwFieldTypeMismatch(fieldName: name, expectedType: ckReferenceType, foundValue: #"ckRecord["\#(name)"]"#))
                         }
@@ -319,7 +318,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     dec =
                     isOptional
                     ? #"""
-                    /// Decoding reference `\#(raw: name)`
                     \#(raw: databaseCheck)
                     let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
                     let \#(raw: name)Query = CKQuery(recordType: \#(raw: wrappedTypeName).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
@@ -343,7 +341,6 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     """#
                     :
                     #"""
-                    /// Decoding reference `\#(raw: name)`
                     \#(raw: databaseCheck)
                     let \#(raw: name)OwnerReference = CKRecord.Reference(recordID: ckRecord.recordID, action: .none)
                     let \#(raw: name)Query = CKQuery(recordType: \#(raw: wrappedTypeName).__recordType, predicate: NSPredicate(format: "\#(raw: ownedFieldName) == %@", \#(raw: name)OwnerReference))
@@ -379,6 +376,7 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     """#)
                 
                 if propertyTypeMarker.propertyType == "rawValue" {
+                    headerComment = "Decoding `\(name)` property from raw value"
                     let rawValueVarName = "rawValue\(name.firstCapitalized)"
                     
                     dec = try CodeBlockItemListSyntax {
@@ -412,10 +410,9 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                                 self.\#(raw: name) = \#(raw: name)
                                 """#)
                         }
-                        
-                        
                     }
                 } else if propertyTypeMarker.propertyType == "codable" {
+                    headerComment = "Decoding `\(name)` from Codable representation"
                     let dataVarName = "\(name)Data"
                     
                     dec = try CodeBlockItemListSyntax {
@@ -444,8 +441,8 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                             try ExprSyntax(validating: "self.\(raw: name) = nil")
                         }
                     }
-                    //.with(\.leadingTrivia, headerComment)
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
+                    headerComment = "Decoding `\(name)` from NSCoding representation"
                     let dataVarName = "\(name)Data"
                     let arrayElementType = declaration.typeAnnotationSyntax.type.arrayElementType
                     
@@ -489,7 +486,11 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 } else {
                     throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
                 }
+                if isOptional {
+                    headerComment.append(" if present")
+                }
             } else if isOptional {
+                headerComment = "Decoding `\(name)` if present"
                 dec = try CodeBlockItemListSyntax {
                     try guardType(of: #"ckRecord["\#(raw: name)"]"#, is: wrappedTypeName, optional: isOptional, andStoreIn: name, forField: name)
                     try ExprSyntax(validating: #"""
@@ -505,7 +506,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                         """#)
                 }
             }
-            declsDec.append(contentsOf: dec.with(\.trailingTrivia, .newlines(2)))
+            
+            
+            declsDec.append(contentsOf: dec
+                .with(\.leadingTrivia, [.docLineComment("/// \(headerComment)"), .newlines(1)])
+                .with(\.trailingTrivia, .newlines(2))
+            )
         }
         
         return declsDec
