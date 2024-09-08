@@ -364,6 +364,12 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     throw diagnose(.error("Unknown reference mode"), node: referenceMarker.node)
                 }
             } else if let propertyTypeMarker = declaration.propertyTypeMarker {
+                let dataDecodingErrorCatch = try CatchClauseSyntax(validating: #"""
+                    catch {
+                        throw CKRecordDecodingError.unableToDecodeDataType(recordType: recordType, fieldName: \#(literal: name), decodingType: \#(literal: propertyTypeMarker.propertyType), error: error)
+                    }
+                    """#)
+                
                 if propertyTypeMarker.propertyType == "rawValue" {
                     if declaration.typeIsOptional {
                         dec = #"""
@@ -396,122 +402,75 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                     }
                     
                 } else if propertyTypeMarker.propertyType == "codable" {
+                    let dataVarName = "\(name)Data"
                     dec = try CodeBlockItemListSyntax {
                         if isOptional {
                             try guardType(
                                 of: #"ckRecord["\#(raw: name)"]"#, is: "Data", optional: isOptional,
-                                andStoreIn: "\(name)Data",
+                                andStoreIn: dataVarName,
                                 forField: name
                             )
                         } else {
                             try checkPresence(ofField: name)
                             try guardType(
                                 of: "\(raw: name)", is: "Data", optional: isOptional,
-                                andStoreIn: "\(name)Data",
+                                andStoreIn: dataVarName,
                                 forField: name
                             )
                         }
                         
-                        let catchClause = try CatchClauseSyntax(validating: #"""
-                            catch {
-                                throw CKRecordDecodingError.unableToDecodeDataType(recordType: recordType, fieldName: \#(literal: name), decodingType: \#(literal: propertyTypeMarker.propertyType), error: error)
-                            }
-                            """#)
-                        let a = try DoStmtSyntax(catchClauses: [catchClause]) {
-                            try ExprSyntax(validating: #"""
-                                self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
-                                """#)
-                        }
-                        
-                        try wrapInIfLet("\(name)Data", if: isOptional) {
-                            try DoStmtSyntax(catchClauses: [catchClause]) {
+                        try wrapInIfLet(dataVarName, if: isOptional) {
+                            try DoStmtSyntax(catchClauses: [dataDecodingErrorCatch]) {
                                 try ExprSyntax(validating: #"""
                                 self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
                                 """#)
                             }
-//                            try CodeBlockItemListSyntax(validating: #"""
-//                                do {
-//                                    self.\#(raw: name) = try JSONDecoder().decode(\#(raw: wrappedTypeName).self, from: \#(raw: name)Data)
-//                                } catch {
-//                                    throw CKRecordDecodingError.unableToDecodeDataType(recordType: recordType, fieldName: \#(literal: name), decodingType: \#(literal: propertyTypeMarker.propertyType), error: error)
-//                                }
-//                                """#)
-//                            a
                         } else: {
                             try ExprSyntax(validating: "self.\(raw: name) = nil")
                         }
                     }
                     //.with(\.leadingTrivia, headerComment)
                 } else if propertyTypeMarker.propertyType == "nsCoding" {
-                    
-                    
+                    let dataVarName = "\(name)Data"
                     let arrayElementType = declaration.typeAnnotationSyntax.type.arrayElementType
+                    
+                    let unarchiveCall: ExprSyntax
+                    if let arrayElementType {
+                        unarchiveCall = try ExprSyntax(validating: #"""
+                            NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: dataVarName))!
+                            """#)
+                    } else {
+                        unarchiveCall = try ExprSyntax(validating: #"""
+                            NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: dataVarName))!
+                            """#)
+                    }
+                    
                     dec = try CodeBlockItemListSyntax {
                         if isOptional {
                             try guardType(
                                 of: #"ckRecord["\#(raw: name)"]"#, is: "Data", optional: isOptional,
-                                andStoreIn: "\(name)Data",
+                                andStoreIn: dataVarName,
                                 forField: name
                             )
                         } else {
                             try checkPresence(ofField: name)
                             try guardType(
                                 of: "\(raw: name)", is: "Data", optional: isOptional,
-                                andStoreIn: "\(name)Data",
+                                andStoreIn: dataVarName,
                                 forField: name
                             )
                         }
                         
-                        
-                        try wrapInIfLet("\(name)Data", if: isOptional) {
-                            if let arrayElementType {
+                        try wrapInIfLet(dataVarName, if: isOptional) {
+                            try DoStmtSyntax(catchClauses: [dataDecodingErrorCatch]) {
                                 try ExprSyntax(validating: #"""
-                                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
-                                """#)
-                            } else {
-                                try ExprSyntax(validating: #"""
-                                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
+                                    self.\#(raw: name) = try\#(raw: questionMarkIfOptional) \#(unarchiveCall)
                                 """#)
                             }
                         } else: {
                             try ExprSyntax(validating: "self.\(raw: name) = nil")
                         }
                     }
-                    
-                    
-                    
-//                    dec = #"""
-//                    /// Decoding `\#(raw: name)`
-//                    guard let \#(raw: name)Data = ckRecord["\#(raw: name)"] as? Data\#(raw: questionMarkIfOptional) else {
-//                        \#(throwFieldTypeMismatch(fieldName: name, expectedType: type, foundValue: #"ckRecord["\#(name)"]"#))
-//                    }
-//                    """#
-//                    
-//                    if isOptional {
-//                        if let arrayElementType {
-//                            dec.append(#"""
-//                                if let \#(raw: name)Data {
-//                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
-//                                }
-//                                """#)
-//                        } else {
-//                            dec.append(#"""
-//                                if let \#(raw: name)Data {
-//                                self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
-//                                }
-//                                """#)
-//                        }
-//                    } else {
-//                        if let arrayElementType {
-//                            dec.append(#"""
-//                            self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedArrayOfObjects(ofClass: \#(raw: arrayElementType.description).self, from: \#(raw: name)Data)!
-//                            """#)
-//                        } else {
-//                            dec.append(#"""
-//                        self.\#(raw: name) = try\#(raw: questionMarkIfOptional) NSKeyedUnarchiver.unarchivedObject(ofClass: \#(raw: wrappedTypeName).self, from: \#(raw: name)Data)!
-//                        """#)
-//                        }
-//                    }
                 } else {
                     throw diagnose(.error("Unknown property type"), node: propertyTypeMarker.node)
                 }
@@ -525,6 +484,14 @@ public struct ConvertibleToCKRecordMacro: MemberMacro {
                 
                 """#
             } else {
+                dec = try CodeBlockItemListSyntax {
+                    try checkPresence(ofField: name)
+                    try guardType(of: #"ckRecord["\#(raw: name)"]"#, is: type, andStoreIn: name, forField: name)
+                    try ExprSyntax(validating: #"""
+                        self.\#(raw: name) = \#(raw: name)
+                        """#)
+                }
+                
                 dec = #"""
                 /// Decoding `\#(raw: name)`
                 guard let raw\#(raw: name.firstCapitalized) = ckRecord["\#(raw: name)"] else {
